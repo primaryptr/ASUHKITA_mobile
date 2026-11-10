@@ -1,0 +1,334 @@
+
+
+
+import 'package:flutter/material.dart';
+import '../../core/app_colors.dart';
+import 'package:provider/provider.dart';
+import '../../core/secure_storage.dart';
+import 'auth_provider.dart';
+import 'register_screen.dart';
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _obscurePassword = true;
+  String? _savedBioEmail;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSavedBiometric();
+  }
+
+  Future<void> _checkSavedBiometric() async {
+    try {
+      final bioEmail = await SecureStorageService().getLastBiometricEmail();
+      if (bioEmail != null && bioEmail.isNotEmpty && mounted) {
+        setState(() {
+          _savedBioEmail = bioEmail;
+
+        });
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  void _handleLogin() async {
+    if (_formKey.currentState!.validate()) {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final success = await auth.login(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+
+      if (!success && mounted) {
+        final errorMsg = auth.errorMessage ?? 'Login gagal: Email belum terdaftar atau kata sandi salah.';
+        if (errorMsg.toLowerCase().contains('belum terdaftar')) {
+          showDialog(
+            context: context,
+            builder: (dCtx) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: const [
+                  Icon(Icons.person_add_alt_1_rounded, color: AppColors.primary, size: 28),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Akun Belum Terdaftar',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+                    ),
+                  ),
+                ],
+              ),
+              content: Text(
+                'Email "${_emailController.text.trim()}" belum terdaftar di sistem AsuhKita.\n\nSilakan mendaftar terlebih dahulu untuk melanjutkan.',
+                style: const TextStyle(fontSize: 14, height: 1.4),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dCtx),
+                  child: const Text('Batal', style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(dCtx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                    );
+                  },
+                  child: const Text('Daftar Sekarang', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(errorMsg)),
+                ],
+              ),
+              backgroundColor: Colors.redAccent,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  void _handleBiometricLogin() async {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final success = await auth.loginWithBiometrics();
+    if (success && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Autentikasi biometrik berhasil! Selamat datang, ${auth.userName}.'),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+    } else if (!success && mounted && auth.errorMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(auth.errorMessage!),
+          backgroundColor: Colors.orangeAccent,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = Provider.of<AuthProvider>(context);
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      resizeToAvoidBottomInset: true,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+
+                  Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.volunteer_activism,
+                      size: 48,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'AsuhKita',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Platform Sponsorship & Donasi Anak Panti Asuhan',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+
+
+                  TextFormField(
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: InputDecoration(
+                      labelText: 'Alamat Email',
+                      prefixIcon: const Icon(Icons.email_outlined),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    validator: (val) {
+                      if (val == null || val.trim().isEmpty) return 'Email wajib diisi';
+                      if (!val.contains('@')) return 'Format email tidak valid';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+
+                  TextFormField(
+                    controller: _passwordController,
+                    obscureText: _obscurePassword,
+                    decoration: InputDecoration(
+                      labelText: 'Kata Sandi',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _obscurePassword = !_obscurePassword;
+                          });
+                        },
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    validator: (val) {
+                      if (val == null || val.isEmpty) return 'Kata sandi wajib diisi';
+                      if (val.length < 6) return 'Minimal 6 karakter';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 24),
+
+
+                  ElevatedButton(
+                    onPressed: auth.isLoading ? null : _handleLogin,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 2,
+                    ),
+                    child: auth.isLoading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(
+                            'Masuk',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                  ),
+                  const SizedBox(height: 16),
+
+
+                  if (auth.isBiometricAvailable) ...[
+                    OutlinedButton.icon(
+                      onPressed: auth.isLoading ? null : _handleBiometricLogin,
+                      icon: const Icon(Icons.fingerprint, color: AppColors.primary, size: 26),
+                      label: const Text(
+                        'Masuk dengan Sidik Jari / Biometrik',
+                        style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: const BorderSide(color: AppColors.primary),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    if (_savedBioEmail != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Sidik jari tertaut: $_savedBioEmail',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: AppColors.primaryDark, fontWeight: FontWeight.w500),
+                      ),
+                    ],
+                  ],
+
+                  const SizedBox(height: 24),
+
+
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Belum memiliki akun? ',
+                        style: TextStyle(color: Colors.grey.shade700),
+                      ),
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                          );
+                        },
+                        child: const Text(
+                          'Daftar Sekarang',
+                          style: TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
