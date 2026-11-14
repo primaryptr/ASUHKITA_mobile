@@ -318,11 +318,11 @@ class _DonationTrackingScreenState extends State<DonationTrackingScreen> {
                                     ),
                                     child: Row(
                                       children: [
-                                        const Icon(Icons.tag, size: 14, color: AppColors.textSecondary),
+                                        const Icon(Icons.confirmation_number_outlined, size: 14, color: AppColors.textSecondary),
                                         const SizedBox(width: 4),
                                         Expanded(
                                           child: Text(
-                                            'Hash: ${item['block_hash']}',
+                                            'Kode Referensi: ${item['certificate_code'] ?? item['id'] ?? '-'}',
                                             style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: AppColors.textSecondary),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,

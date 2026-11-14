@@ -4,6 +4,8 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/app_colors.dart';
 import '../../core/dio_client.dart';
 import '../../data/local_db.dart';
+import '../../services/gemini_service.dart';
+import '../home/home_screen.dart';
 import '../sponsor/sponsor_screen.dart';
 
 class AdminPanelScreen extends StatefulWidget {
@@ -1249,6 +1251,138 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     }
   }
 
+  void _showPublishReportModal(Map<String, dynamic> child) {
+    final childId = (child['id'] ?? '').toString();
+    final childName = (child['alias'] ?? child['name'] ?? 'Anak Asuh').toString();
+    final titleCtrl = TextEditingController();
+    final summaryCtrl = TextEditingController();
+    String selectedCategory = 'Prestasi';
+    String evidenceUrl = '';
+    bool isPolishing = false;
+    bool isSaving = false;
+
+    showDialog(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (dCtx, setModalState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Text('Bagikan Kabar $childName', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: selectedCategory,
+                  decoration: const InputDecoration(labelText: 'Kategori Kabar', border: OutlineInputBorder()),
+                  items: const ['Prestasi', 'Karya Anak', 'Kesehatan', 'Kegiatan']
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                      .toList(),
+                  onChanged: (val) => setModalState(() => selectedCategory = val ?? 'Prestasi'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: titleCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Judul Kabar',
+                    hintText: 'Contoh: Juara Lomba Mewarnai',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: summaryCtrl,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Cerita Perkembangan',
+                    hintText: 'Ceritakan momen baik anak hari ini...',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: isPolishing
+                      ? null
+                      : () async {
+                          final raw = summaryCtrl.text.trim();
+                          if (raw.isEmpty) return;
+                          setModalState(() => isPolishing = true);
+                          final polished = await GeminiService().summarizeReport('$childName: $raw');
+                          if (dCtx.mounted) {
+                            setModalState(() {
+                              summaryCtrl.text = polished;
+                              isPolishing = false;
+                            });
+                          }
+                        },
+                  icon: const Icon(Icons.auto_awesome, size: 16),
+                  label: Text(isPolishing ? 'Merapikan...' : 'Rapikan Kalimat dengan AI', style: const TextStyle(fontSize: 12)),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await _picker.pickImage(
+                      source: ImageSource.gallery,
+                      maxWidth: 800,
+                      imageQuality: 65,
+                    );
+                    if (picked != null) {
+                      final bytes = await picked.readAsBytes();
+                      setModalState(() {
+                        evidenceUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                      });
+                    }
+                  },
+                  icon: const Icon(Icons.photo_camera_outlined, size: 16),
+                  label: Text(evidenceUrl.isEmpty ? 'Lampirkan Foto / Karya (Opsional)' : 'Foto Terlampir ✓', style: const TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
+            ElevatedButton(
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      if (titleCtrl.text.trim().isEmpty && summaryCtrl.text.trim().isEmpty) return;
+                      setModalState(() => isSaving = true);
+                      final payload = {
+                        'id': 'rep_${DateTime.now().millisecondsSinceEpoch}',
+                        'child_id': childId,
+                        'child_alias': childName,
+                        'title': titleCtrl.text.trim(),
+                        'category': selectedCategory,
+                        'period': DateTime.now().toIso8601String().substring(0, 7),
+                        'summary': summaryCtrl.text.trim(),
+                        'evidence_url': evidenceUrl,
+                        'author_name': 'Pengurus Panti',
+                        'created_at': DateTime.now().toIso8601String(),
+                      };
+                      try {
+                        final res = await DioClient().dio.post('/reports', data: payload);
+                        if (res.statusCode == 201 && res.data is Map && res.data['data'] is Map) {
+                          payload['id'] = res.data['data']['id']?.toString() ?? payload['id']!;
+                        }
+                      } catch (_) {}
+                      await _localDb.cacheProgressReports([payload]);
+                      HomeScreen.refreshNotifier.value++;
+                      if (dCtx.mounted) Navigator.pop(dCtx);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Kabar perkembangan $childName dipublikasikan!'), backgroundColor: AppColors.primary),
+                        );
+                      }
+                    },
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+              child: Text(isSaving ? 'Menyimpan...' : 'Publikasikan'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showChildDetailAndReceiptDialog(Map<String, dynamic> child) {
     final childName = (child['name'] ?? child['alias'] ?? 'Anak Asuh').toString();
     final catBudgetsMap = (child['categoryBudgetsMap'] as Map<String, double>?) ?? {};
@@ -1575,8 +1709,87 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                             );
                           }).toList(),
                         ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _showPublishReportModal(child),
+                              icon: const Icon(Icons.campaign_outlined, size: 18),
+                              label: const Text('Bagikan Kabar Anak', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppColors.primary,
+                                side: const BorderSide(color: AppColors.primary),
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                       const Divider(height: 28),
 
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Wishlist Kebutuhan Anak',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
+                                ),
+                                Text(
+                                  'Daftar kebutuhan spesifik yang bisa didanai donatur',
+                                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                                ),
+                              ],
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () => _showAddWishlistDialog(child),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('Tambah Wishlist', style: TextStyle(fontSize: 11)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      FutureBuilder<List<Map<String, dynamic>>>(
+                        future: _loadWishlistsForChild(
+                          childId: (child['id'] ?? '').toString(),
+                          childName: childName,
+                        ),
+                        builder: (context, wlSnap) {
+                          final wishlists = wlSnap.data ?? [];
+                          if (wishlists.isEmpty) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 6),
+                              child: Text('Belum ada wishlist kebutuhan anak.', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                            );
+                          }
+                          return Column(
+                            children: wishlists.map((w) {
+                              final status = (w['status'] ?? 'open').toString();
+                              final est = (w['estimated_idr'] is num)
+                                  ? (w['estimated_idr'] as num).toDouble()
+                                  : double.tryParse(w['estimated_idr']?.toString() ?? '0') ?? 0.0;
+                              return ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                title: Text((w['item_name'] ?? '').toString(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                subtitle: Text('${_formatRupiah(est)} • Status: $status', style: const TextStyle(fontSize: 11)),
+                                trailing: status == 'funded'
+                                    ? TextButton(
+                                        onPressed: () => _showAddReceiptDialog(child, wishlistItem: w),
+                                        child: const Text('Tandai Disalurkan', style: TextStyle(fontSize: 11)),
+                                      )
+                                    : null,
+                              );
+                            }).toList(),
+                          );
+                        },
+                      ),
+                      const Divider(height: 28),
 
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1696,7 +1909,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                                               borderRadius: BorderRadius.circular(4),
                                             ),
                                             child: Text(
-                                              'Hash: ${r['hash'] ?? '0x7f4b8...'}',
+                                              'Kode Nota: ${r['id'] ?? '-'}',
                                               style: TextStyle(fontFamily: 'monospace', fontSize: 10, color: Colors.grey[700]),
                                             ),
                                           ),
@@ -1722,14 +1935,117 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     );
   }
 
+  Future<List<Map<String, dynamic>>> _loadWishlistsForChild({
+    required String childId,
+    required String childName,
+  }) async {
+    try {
+      final res = await DioClient().dio.get('/wishlists', queryParameters: {
+        if (childId.isNotEmpty) 'child_id': childId,
+      });
+      if (res.statusCode == 200 && res.data is Map && res.data['data'] is List) {
+        final remote = List<Map<String, dynamic>>.from(
+          (res.data['data'] as List).map((e) => Map<String, dynamic>.from(e as Map)),
+        );
+        if (remote.isNotEmpty) {
+          await _localDb.cacheWishlists(remote);
+          return remote;
+        }
+      }
+    } catch (_) {}
+    return _localDb.getCachedWishlists(childId: childId, childAlias: childName);
+  }
+
+  Future<void> _showAddWishlistDialog(Map<String, dynamic> child) async {
+    final childId = (child['id'] ?? '').toString();
+    final childName = (child['name'] ?? child['alias'] ?? 'Anak Asuh').toString();
+    final itemCtrl = TextEditingController();
+    final estCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: Text('Tambah Wishlist $childName', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: itemCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Nama Kebutuhan (mis. Sepatu Sekolah)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: estCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Estimasi Biaya (Rp)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+
+    final itemName = itemCtrl.text.trim();
+    final estNum = double.tryParse(estCtrl.text.trim()) ?? 0.0;
+    itemCtrl.dispose();
+    estCtrl.dispose();
+
+    if (confirmed != true || itemName.isEmpty || estNum <= 0) return;
+
+    final payload = {
+      'id': 'wl_${DateTime.now().millisecondsSinceEpoch}',
+      'child_id': childId,
+      'child_alias': childName,
+      'item_name': itemName,
+      'estimated_idr': estNum,
+      'status': 'open',
+      'created_at': DateTime.now().toIso8601String(),
+    };
+    try {
+      final res = await DioClient().dio.post('/wishlists', data: payload);
+      if (res.statusCode == 201 && res.data is Map && res.data['data'] is Map) {
+        payload['id'] = res.data['data']['id']?.toString() ?? payload['id']!;
+      }
+    } catch (_) {}
+    await _localDb.cacheWishlists([payload]);
+
+    if (mounted) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Wishlist "$itemName" ditambahkan untuk $childName'), backgroundColor: AppColors.primary),
+      );
+    }
+  }
+
   Future<List<Map<String, dynamic>>> _loadReceiptsForChild(String childName) async {
     final allReceipts = await _localDb.getReceipts();
     return allReceipts.where((r) => (r['childName'] ?? '').toString().toLowerCase() == childName.toLowerCase()).toList();
   }
 
-  Future<void> _showAddReceiptDialog(Map<String, dynamic> child) async {
-    final titleCtrl = TextEditingController();
-    final amountCtrl = TextEditingController();
+  Future<void> _showAddReceiptDialog(Map<String, dynamic> child, {Map<String, dynamic>? wishlistItem}) async {
+    final titleCtrl = TextEditingController(
+      text: wishlistItem != null ? 'Pembelian ${wishlistItem['item_name'] ?? 'Kebutuhan'}' : '',
+    );
+    final amountCtrl = TextEditingController(
+      text: wishlistItem != null && wishlistItem['estimated_idr'] != null
+          ? (wishlistItem['estimated_idr'] is num
+              ? (wishlistItem['estimated_idr'] as num).toInt().toString()
+              : wishlistItem['estimated_idr'].toString())
+          : '',
+    );
     final descCtrl = TextEditingController();
     String? receiptBase64;
     final childName = child['name'] ?? child['alias'] ?? 'Anak Asuh';
@@ -1821,13 +2137,27 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                   await DioClient().dio.post('/ledger/receipts', data: newReceipt);
                 } catch (_) {}
 
+                if (wishlistItem != null && (wishlistItem['id'] ?? '').toString().isNotEmpty) {
+                  final wlId = wishlistItem['id'].toString();
+                  try {
+                    await DioClient().dio.patch('/wishlists/$wlId/fulfill', data: {'receipt_url': receiptBase64 ?? ''});
+                  } catch (_) {}
+                  await _localDb.cacheWishlists([
+                    {
+                      ...wishlistItem,
+                      'status': 'fulfilled',
+                      'receipt_url': receiptBase64 ?? '',
+                    }
+                  ]);
+                }
+
                 if (dCtx.mounted) {
                   Navigator.pop(dCtx);
                 }
                 if (mounted) {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Nota berhasil disimpan & dicatat ke Blockchain Ledger!'), backgroundColor: AppColors.primary),
+                    const SnackBar(content: Text('Nota berhasil disimpan dan dibagikan untuk transparansi donatur!'), backgroundColor: AppColors.primary),
                   );
                 }
               },
@@ -1965,34 +2295,17 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-            appBar: AppBar(
-        leading: Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
-                  blurRadius: 4,
-                ),
-              ],
-            ),
-            child: const Center(
-              child: Icon(
-                Icons.volunteer_activism,
-                color: AppColors.primary,
-                size: 20,
-              ),
-            ),
-          ),
-        ),
+      appBar: AppBar(
         title: const Text('Panel Kelola Panti', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
+          IconButton(
+            tooltip: 'Broadcast Kabar ke Donatur',
+            icon: const Icon(Icons.campaign_outlined),
+            onPressed: () => showAdminBroadcastDialog(context),
+          ),
           IconButton(
             tooltip: 'Refresh Data',
             icon: const Icon(Icons.refresh),
@@ -2224,4 +2537,84 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
             ),
     );
   }
+}
+
+Future<void> showAdminBroadcastDialog(BuildContext context) async {
+  final titleCtrl = TextEditingController();
+  final bodyCtrl = TextEditingController();
+  bool isSending = false;
+
+  await showDialog<void>(
+    context: context,
+    builder: (dCtx) => StatefulBuilder(
+      builder: (dCtx, setDialogState) => AlertDialog(
+        title: const Text('Broadcast Kabar ke Donatur', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleCtrl,
+                maxLength: 120,
+                decoration: const InputDecoration(
+                  labelText: 'Judul Notifikasi',
+                  hintText: 'Contoh: Laporan & Kabar Terbaru Anak Asuh',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: bodyCtrl,
+                maxLines: 4,
+                maxLength: 1000,
+                decoration: const InputDecoration(
+                  labelText: 'Isi Pesan Broadcast',
+                  hintText: 'Tulis pengumuman atau ucapan terima kasih untuk seluruh donatur...',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: isSending
+                ? null
+                : () async {
+                    final title = titleCtrl.text.trim();
+                    final body = bodyCtrl.text.trim();
+                    if (title.isEmpty || body.isEmpty) {
+                      ScaffoldMessenger.of(dCtx).showSnackBar(
+                        const SnackBar(content: Text('Judul dan isi pesan wajib diisi.')),
+                      );
+                      return;
+                    }
+                    setDialogState(() => isSending = true);
+                    String feedback = 'Broadcast tercatat untuk dikirim saat terhubung.';
+                    try {
+                      final res = await DioClient().dio.post(
+                        '/notifications/broadcast',
+                        data: {'title': title, 'body': body},
+                      );
+                      if (res.statusCode == 200) {
+                        feedback = 'Broadcast notifikasi berhasil dikirim ke donatur!';
+                      }
+                    } catch (_) {}
+                    if (dCtx.mounted) Navigator.pop(dCtx);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(feedback), backgroundColor: AppColors.primary),
+                      );
+                    }
+                  },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            child: Text(isSending ? 'Mengirim...' : 'Kirim Broadcast'),
+          ),
+        ],
+      ),
+    ),
+  );
+  titleCtrl.dispose();
+  bodyCtrl.dispose();
 }

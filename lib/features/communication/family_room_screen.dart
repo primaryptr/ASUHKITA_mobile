@@ -16,6 +16,7 @@ import '../../data/local_db.dart';
 import '../auth/auth_provider.dart';
 import '../home/home_screen.dart';
 import '../sponsor/sponsor_screen.dart';
+import 'child_gallery_screen.dart';
 Widget buildChildAvatar(
   String? avatarUrl, {
   double radius = 24,
@@ -70,16 +71,6 @@ class _FamilyRoomScreenState extends State<FamilyRoomScreen> {
   bool _isLoading = true;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
-
-
-  final Map<String, String> _childNotes = {
-    'Bintang': 'Lagi les matematika 📚',
-    'Bulan': 'Selesai gambar gunung 🎨',
-    'Awan': 'Bermain bola di panti ⚽',
-    'Rian': 'Sedang membaca buku 📖',
-    'Siti': 'Belajar hafalan doa ✨',
-    'Dewi': 'Membantu masak di panti 🍳',
-  };
 
   @override
   void initState() {
@@ -170,10 +161,12 @@ class _FamilyRoomScreenState extends State<FamilyRoomScreen> {
             final titleCase = alias.length > 1 ? '${alias[0].toUpperCase()}${alias.substring(1)}' : alias;
             final avatar = (matched['avatar'] ?? matched['photo'] ?? matchedDonation['child_avatar'] ?? '').toString();
             mySponsoredChildren.add({
+              'id': matched['id'] ?? '',
               'alias': matched['alias'] ?? matched['name'] ?? titleCase,
               'name': matched['alias'] ?? matched['name'] ?? titleCase,
               'orphanage_city': matched['orphanage_city'] ?? matched['city'] ?? matchedDonation['child_city'] ?? 'Peduli Anak, Lombok',
               'need_category': matched['need_category'] ?? matched['urgent_needs'] ?? matchedDonation['need_category'] ?? 'Pendidikan',
+              'daily_status': matched['daily_status'] ?? '',
               'avatar': avatar,
             });
           }
@@ -226,8 +219,85 @@ class _FamilyRoomScreenState extends State<FamilyRoomScreen> {
     }
   }
 
+  Future<void> _showUpdateDailyStatusDialog(Map<String, dynamic> child) async {
+    final childId = (child['id'] ?? '').toString().trim();
+    final name = (child['alias'] ?? child['name'] ?? 'Anak').toString();
+    final controller = TextEditingController(text: (child['daily_status'] ?? '').toString());
+    final presets = [
+      'Semangat belajar 🎒',
+      'Lagi les matematika 📚',
+      'Sedang menggambar 🎨',
+      'Bermain bersama teman ⚽',
+      'Istirahat siang 😴',
+    ];
+
+    final updated = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Update Status $name', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: presets.map((p) {
+                  return ActionChip(
+                    label: Text(p, style: const TextStyle(fontSize: 11)),
+                    onPressed: () => controller.text = p,
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                maxLength: 80,
+                decoration: const InputDecoration(
+                  labelText: 'Status harian singkat',
+                  hintText: 'Contoh: Semangat belajar 🎒',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (updated == null || updated.isEmpty) return;
+
+    if (childId.isNotEmpty) {
+      try {
+        await DioClient().dio.patch('/children/$childId/daily-status', data: {'daily_status': updated});
+      } catch (_) {}
+    }
+    try {
+      await LocalDatabase().updateChildDailyStatusLocal(childId.isNotEmpty ? childId : name, updated);
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() {
+        child['daily_status'] = updated;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Status harian $name diperbarui'), backgroundColor: AppColors.primary),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isAdmin = Provider.of<AuthProvider>(context, listen: false).isAdmin;
 
     final filtered = _children.where((c) {
       final name = (c['alias'] ?? c['name'] ?? '').toString().toLowerCase();
@@ -322,7 +392,8 @@ class _FamilyRoomScreenState extends State<FamilyRoomScreen> {
                         final child = _children[idx];
                         final name = (child['alias'] ?? child['name'] ?? 'Anak').toString();
                         final avatar = (child['avatar'] ?? child['photo'] ?? '').toString();
-                        final note = _childNotes[name] ?? 'Semangat belajar 🎒';
+                        final rawStatus = (child['daily_status'] ?? '').toString().trim();
+                        final note = rawStatus.isNotEmpty ? rawStatus : 'Semangat belajar 🎒';
                         final hasChat = _lastMessages[name.trim().toLowerCase()] != null;
 
                         return InkWell(
@@ -335,21 +406,35 @@ class _FamilyRoomScreenState extends State<FamilyRoomScreen> {
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
 
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                  margin: const EdgeInsets.only(bottom: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(12),
-                                    boxShadow: [
-                                      BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4, offset: const Offset(0, 1)),
-                                    ],
-                                  ),
-                                  child: Text(
-                                    note,
-                                    style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                                GestureDetector(
+                                  onTap: isAdmin ? () => _showUpdateDailyStatusDialog(child) : null,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                    margin: const EdgeInsets.only(bottom: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      boxShadow: [
+                                        BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4, offset: const Offset(0, 1)),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            note,
+                                            style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        if (isAdmin) ...[
+                                          const SizedBox(width: 2),
+                                          const Icon(Icons.edit, size: 9, color: AppColors.primary),
+                                        ],
+                                      ],
+                                    ),
                                   ),
                                 ),
 
@@ -717,6 +802,7 @@ class _FamilyRoomScreenState extends State<FamilyRoomScreen> {
   }
 
   Future<void> _openChatRoom(Map<String, dynamic> child) async {
+    final childId = (child['id'] ?? '').toString();
     final name = (child['alias'] ?? child['name'] ?? 'Anak Asuh').toString();
     final avatar = (child['avatar'] ?? child['photo'] ?? '').toString();
     final city = (child['orphanage_city'] ?? child['city'] ?? '').toString();
@@ -727,6 +813,7 @@ class _FamilyRoomScreenState extends State<FamilyRoomScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => _ChatRoomScreen(
+          childId: childId,
           childAlias: name,
           childAvatar: avatar,
           childCity: city,
@@ -748,6 +835,7 @@ class _FamilyRoomScreenState extends State<FamilyRoomScreen> {
 
 
 class _ChatRoomScreen extends StatefulWidget {
+  final String childId;
   final String childAlias;
   final String childAvatar;
   final String childCity;
@@ -755,6 +843,7 @@ class _ChatRoomScreen extends StatefulWidget {
   final bool isViewerAdmin;
 
   const _ChatRoomScreen({
+    this.childId = '',
     required this.childAlias,
     required this.childAvatar,
     this.childCity = '',
@@ -825,7 +914,12 @@ class _ChatRoomScreenState extends State<_ChatRoomScreen> {
 
 
 
-  void _sendMessage({String? text, String? fileUrl, String type = 'text'}) {
+  void _sendMessage({
+    String? text,
+    String? fileUrl,
+    String type = 'text',
+    bool isGalleryItem = false,
+  }) {
     final content = text ?? _messageController.text.trim();
     if (content.isEmpty && fileUrl == null) return;
 
@@ -859,11 +953,13 @@ class _ChatRoomScreenState extends State<_ChatRoomScreen> {
 
     try {
       DioClient().dio.post('/letters', data: {
+        if (widget.childId.isNotEmpty) 'child_id': widget.childId,
         'child_alias': widget.childAlias,
         'sender': senderRole,
         'text': content,
         'type': type,
         'file_url': fileUrl ?? '',
+        'is_gallery_item': isGalleryItem,
       });
     } catch (_) {}
 
@@ -913,12 +1009,69 @@ class _ChatRoomScreenState extends State<_ChatRoomScreen> {
   }
 
   Future<void> _pickAndSendFile() async {
-    final XFile? file = await _picker.pickImage(source: ImageSource.gallery, maxWidth: 800);
-    if (file != null) {
-      final bytes = await file.readAsBytes();
-      final b64 = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+    final XFile? file = await _picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 800,
+      imageQuality: 65,
+    );
+    if (file == null) return;
+
+    final bytes = await file.readAsBytes();
+    final b64 = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+
+    if (!widget.isViewerAdmin) {
       _sendMessage(text: '📎 Karya/Foto dikirim', fileUrl: b64, type: 'file');
+      return;
     }
+    if (!mounted) return;
+
+    final captionController = TextEditingController(text: 'Karya/Foto terbaru ${widget.childAlias}');
+    bool saveToGallery = true;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Kirim Foto / Karya Anak', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: captionController,
+                decoration: const InputDecoration(
+                  labelText: 'Keterangan Foto/Karya',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Simpan ke Galeri Karya', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                subtitle: const Text('Tampilkan di album karya & foto anak', style: TextStyle(fontSize: 11)),
+                value: saveToGallery,
+                activeThumbColor: AppColors.primary,
+                onChanged: (val) => setDialogState(() => saveToGallery = val),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Kirim')),
+          ],
+        ),
+      ),
+    );
+
+    final caption = captionController.text.trim();
+    captionController.dispose();
+    if (confirmed != true) return;
+
+    _sendMessage(
+      text: caption.isNotEmpty ? caption : '📎 Karya/Foto dikirim',
+      fileUrl: b64,
+      type: 'file',
+      isGalleryItem: saveToGallery,
+    );
   }
 
   void _scrollToBottom() {
@@ -1053,6 +1206,22 @@ class _ChatRoomScreenState extends State<_ChatRoomScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.photo_library_outlined, color: AppColors.textPrimary),
+            tooltip: 'Galeri Karya Anak',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ChildGalleryScreen(
+                    childId: widget.childId,
+                    childAlias: widget.childAlias,
+                    isAdmin: widget.isViewerAdmin,
+                  ),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.phone_outlined, color: AppColors.textPrimary),
             tooltip: 'Panggilan Suara',

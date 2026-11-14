@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
-import '../ledger/ledger_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
@@ -23,11 +22,13 @@ import '../../services/exchange_rate_service.dart';
 class DonationFormScreen extends StatefulWidget {
   final Map<String, dynamic> childData;
   final Map<String, dynamic> packageData;
+  final Map<String, dynamic>? wishlistItem;
 
   const DonationFormScreen({
     super.key,
     required this.childData,
     required this.packageData,
+    this.wishlistItem,
   });
 
   @override
@@ -94,6 +95,13 @@ class _DonationFormScreenState extends State<DonationFormScreen> {
   @override
   void initState() {
     super.initState();
+    final wlEst = widget.wishlistItem?['estimated_idr'];
+    if (wlEst != null) {
+      final estNum = wlEst is num ? wlEst.toInt() : int.tryParse(wlEst.toString()) ?? 0;
+      if (estNum > 0) {
+        _amountController.text = estNum.toString();
+      }
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         try {
@@ -111,8 +119,10 @@ class _DonationFormScreenState extends State<DonationFormScreen> {
   }
 
   Future<void> _fetchRealTimeRates() async {
+    if (!mounted) return;
     setState(() => _isFetchingRates = true);
     final rates = await _rateService.fetchRates();
+    if (!mounted) return;
     setState(() {
       _exchangeRates = rates;
       _isUsingRealtimeRates = _rateService.isUsingRealtime;
@@ -612,6 +622,20 @@ class _DonationFormScreenState extends State<DonationFormScreen> {
         // Kirim ke backend secara non-blocking — donasi tetap berhasil meski backend offline
     unawaited(DioClient().dio.post('/donations', data: donationPayload).then((_) {}, onError: (_) {}));
 
+    if (widget.wishlistItem != null && (widget.wishlistItem!['id'] ?? '').toString().isNotEmpty) {
+      final wl = Map<String, dynamic>.from(widget.wishlistItem!);
+      final wlId = wl['id'].toString();
+      unawaited(
+        DioClient()
+            .dio
+            .post('/wishlists/$wlId/fund', data: {'amount_idr': _calculatedIdr, 'donor_name': donorName})
+            .then((_) {}, onError: (_) {}),
+      );
+      wl['status'] = 'funded';
+      wl['funded_by_name'] = donorName;
+      await LocalDatabase().cacheWishlists([wl]);
+    }
+
     await LocalDatabase().insertDonation({
       'id': 'don_$timestamp',
       'sponsorship_id': 'sp_$timestamp',
@@ -629,7 +653,7 @@ class _DonationFormScreenState extends State<DonationFormScreen> {
       'certificate_code': certificateCode,
       'block_hash': blockHash,
       'created_at': DateTime.now().toIso8601String(),
-      'status': 'Terverifikasi di Ledger Blockchain',
+      'status': 'Tercatat & Terverifikasi',
     });
 
     // Simpan anak asuh secara langsung tanpa menghapus data anak lainnya di SQLite
@@ -777,7 +801,6 @@ class _DonationFormScreenState extends State<DonationFormScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text('No. Sertifikat: $certCode', style: const TextStyle(fontSize: 10, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
-                      Text('SHA-256 Ledger: ${hash.length > 16 ? hash.substring(0, 16) : hash}...', style: TextStyle(fontSize: 9, color: Colors.grey.shade600)),
                       const SizedBox(height: 8),
                       Container(
                         padding: const EdgeInsets.all(8),
@@ -789,7 +812,7 @@ class _DonationFormScreenState extends State<DonationFormScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('🔗 Link Verifikasi Blockchain:', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                            const Text('🔗 Tautan Sertifikat Donasi:', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
                             const SizedBox(height: 4),
                             SelectableText(
                               credentialUrl,
@@ -803,7 +826,7 @@ class _DonationFormScreenState extends State<DonationFormScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  '✅ Transaksi berhasil terverifikasi dan dicatat pada blockchain ledger!',
+                  '✅ Donasi Anda berhasil dicatat dan terverifikasi!',
                   style: TextStyle(fontSize: 11, color: Colors.green.shade800),
                   textAlign: TextAlign.center,
                 ),
@@ -834,49 +857,26 @@ class _DonationFormScreenState extends State<DonationFormScreen> {
                 ),
                 const SizedBox(height: 8),
 
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          Clipboard.setData(ClipboardData(text: credentialUrl));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Link kredensial berhasil disalin ke clipboard!'),
-                              backgroundColor: Colors.green,
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.copy, size: 16),
-                        label: const Text('Salin Link', style: TextStyle(fontSize: 12)),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: credentialUrl));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Link sertifikat berhasil disalin ke clipboard!'),
+                          backgroundColor: Colors.green,
+                          duration: Duration(seconds: 2),
                         ),
-                      ),
+                      );
+                    },
+                    icon: const Icon(Icons.copy, size: 16),
+                    label: const Text('Salin Tautan Sertifikat', style: TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => LedgerScreen()),
-                          );
-                        },
-                        icon: const Icon(Icons.verified_outlined, size: 16),
-                        label: const Text('Cek Ledger', style: TextStyle(fontSize: 12)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.indigo,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
                 const SizedBox(height: 10),
                 SizedBox(

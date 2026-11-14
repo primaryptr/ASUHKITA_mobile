@@ -89,6 +89,7 @@ const getChildren = async (req, res, next) => {
       SELECT c.id, c.alias, c.age, c.gender, c.need_category,
              c.story_summary, c.avatar, c.status,
              c.target, c.dream, c.hobby, c.category_budgets,
+             COALESCE(c.daily_status, '') AS daily_status, c.birth_date,
              COALESCE(c.orphanage_city, o.city, 'Lombok') AS orphanage_city,
              COALESCE(c.orphanage_name, o.name, 'Peduli Anak Foundation') AS orphanage_name,
              o.id AS orphanage_id
@@ -140,6 +141,7 @@ const getChildDetail = async (req, res, next) => {
     const childResult = await query(
       `SELECT c.id, c.alias, c.age, c.gender, c.need_category,
               c.story_summary, c.avatar, c.status,
+              COALESCE(c.daily_status, '') AS daily_status, c.birth_date,
               o.id AS orphanage_id, o.name AS orphanage_name,
               o.city AS orphanage_city, o.address AS orphanage_address,
               o.phone AS orphanage_phone
@@ -441,4 +443,53 @@ const deleteAllChildren = async (req, res, next) => {
   }
 };
 
-module.exports = { getChildren, getChildDetail, getPackages, createChild, updateChild, deleteChild, deleteAllChildren };
+const updateDailyStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const rawStatus = req.body?.daily_status ?? '';
+    const dailyStatus = String(rawStatus).trim();
+
+    if (dailyStatus.length > 120) {
+      return res.status(400).json({
+        success: false,
+        message: 'Status harian maksimal 120 karakter.',
+        error: 'DAILY_STATUS_TOO_LONG',
+      });
+    }
+
+    const result = await query(
+      `UPDATE children
+       SET daily_status = $1
+       WHERE id::text = $2 OR alias ILIKE $2
+       RETURNING id, alias, daily_status`,
+      [dailyStatus, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Data anak tidak ditemukan.',
+        error: 'CHILD_NOT_FOUND',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Status harian anak berhasil diperbarui.',
+      data: result.rows[0],
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = {
+  getChildren,
+  getChildDetail,
+  getPackages,
+  createChild,
+  updateChild,
+  updateDailyStatus,
+  deleteChild,
+  deleteAllChildren,
+};

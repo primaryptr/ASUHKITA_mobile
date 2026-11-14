@@ -402,6 +402,36 @@ class NotificationService {
     );
   }
 
+  Future<void> scheduleChildBirthdayReminder({
+    required String childId,
+    required String childAlias,
+    required DateTime birthDate,
+  }) async {
+    if (kIsWeb) return;
+    await initialize();
+
+    final now = DateTime.now();
+    DateTime nextBirthday = DateTime(now.year, birthDate.month, birthDate.day, 9, 0);
+    if (!nextBirthday.isAfter(now)) {
+      nextBirthday = DateTime(now.year + 1, birthDate.month, birthDate.day, 9, 0);
+    }
+
+    final scheduledTz = tz.TZDateTime.from(nextBirthday, tz.local);
+    final notifId = (childId.hashCode.abs() % 100000) + 50000;
+    final mode = await _getScheduleMode();
+
+    await _flutterLocalNotificationsPlugin.zonedSchedule(
+      id: notifId,
+      title: '🎂 Selamat Ulang Tahun untuk $childAlias!',
+      body: 'Hari ini adalah hari spesial ananda $childAlias. Kirimkan doa & hadiah kecil di AsuhKita!',
+      scheduledDate: scheduledTz,
+      notificationDetails: _notifDetails,
+      androidScheduleMode: mode,
+      matchDateTimeComponents: DateTimeComponents.dateAndTime,
+      payload: 'birthday_$childId',
+    );
+  }
+
   Future<void> cancelAll() async {
     if (kIsWeb) return;
     await _flutterLocalNotificationsPlugin.cancelAll();

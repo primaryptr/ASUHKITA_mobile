@@ -3,9 +3,14 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile/features/home/iot_donation_screen.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   group('FR-52, FR-53, FR-54 | IoT Donation Screen Widget Tests', () {
     Widget makeTestable() => const MaterialApp(
           home: MediaQuery(
@@ -87,14 +92,14 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
       await tester.pumpWidget(makeTestable());
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(find.text('Riwayat Deteksi Kotak Amal IoT'), findsOneWidget);
 
       expect(find.textContaining('Panti Kasih Ibu'), findsWidgets);
     });
 
-    testWidgets('FR-53 | Block hash ditampilkan di setiap item', (tester) async {
+    testWidgets('FR-53 | ID Perangkat ditampilkan di setiap item tanpa label Blok Hash', (tester) async {
       tester.view.physicalSize = const Size(800, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() {
@@ -102,9 +107,10 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
       await tester.pumpWidget(makeTestable());
-      await tester.pump();
+      await tester.pumpAndSettle();
 
-      expect(find.textContaining('Blok Hash:'), findsWidgets);
+      expect(find.textContaining('ID Perangkat:'), findsWidgets);
+      expect(find.textContaining('Blok Hash:'), findsNothing);
     });
   });
 }

@@ -1,10 +1,10 @@
 
 const express = require('express');
 const router = express.Router();
-const { verifyToken } = require('../middlewares/auth.middleware');
+const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
 const {
   getNearbyOrphanages, getAllOrphanages, checkIn,
-  createSchedule, getSchedules
+  createSchedule, getSchedules, updateScheduleStatus
 } = require('../controllers/orphanages.controller');
 
 
@@ -15,5 +15,6 @@ router.post('/:id/checkin', verifyToken, checkIn);
 
 router.post('/schedules', verifyToken, createSchedule);
 router.get('/schedules', verifyToken, getSchedules);
+router.patch('/schedules/:id/status', verifyToken, requireRole('admin_panti'), updateScheduleStatus);
 
 module.exports = router;

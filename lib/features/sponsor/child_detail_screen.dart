@@ -1,14 +1,20 @@
 
 
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/app_colors.dart';
+import '../../core/dio_client.dart';
 import '../../data/local_db.dart';
+import '../../services/gemini_service.dart';
+import '../../services/notification_service.dart';
 import '../auth/auth_provider.dart';
+import '../communication/child_gallery_screen.dart';
 import '../communication/family_room_screen.dart';
 import '../donation/donation_form_screen.dart';
 import '../home/home_screen.dart';
+import '../reports/progress_feed_screen.dart';
 import '../schedule/schedule_screen.dart';
 
 class ChildDetailScreen extends StatefulWidget {
@@ -25,6 +31,9 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
   bool _isSponsoredByMe = false;
   int _myTotalDonation = 0;
   List<Map<String, dynamic>> _myDonations = [];
+  List<Map<String, dynamic>> _childReports = [];
+  List<Map<String, dynamic>> _childWishlists = [];
+  List<Map<String, dynamic>> _childReceipts = [];
   String? _childDream;
   String? _childHobby;
 
@@ -112,11 +121,83 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
         }
       } catch (_) {}
 
+      List<Map<String, dynamic>> loadedReports = [];
+      try {
+        final repRes = await DioClient().dio.get('/reports', queryParameters: {
+          if (childId.isNotEmpty) 'child_id': widget.childData['id'],
+        });
+        if (repRes.statusCode == 200 && repRes.data is Map && repRes.data['data'] is List) {
+          loadedReports = List<Map<String, dynamic>>.from(
+            (repRes.data['data'] as List).map((e) => Map<String, dynamic>.from(e as Map)),
+          );
+          if (loadedReports.isNotEmpty) {
+            await LocalDatabase().cacheProgressReports(loadedReports);
+          }
+        }
+      } catch (_) {}
+      if (loadedReports.isEmpty) {
+        try {
+          loadedReports = await LocalDatabase().getCachedProgressReports(
+            childId: widget.childData['id']?.toString(),
+            childAlias: (widget.childData['alias'] ?? widget.childData['name'])?.toString(),
+          );
+        } catch (_) {}
+      }
+
+      List<Map<String, dynamic>> loadedWishlists = [];
+      try {
+        final wlRes = await DioClient().dio.get('/wishlists', queryParameters: {
+          if (childId.isNotEmpty) 'child_id': widget.childData['id'],
+        });
+        if (wlRes.statusCode == 200 && wlRes.data is Map && wlRes.data['data'] is List) {
+          loadedWishlists = List<Map<String, dynamic>>.from(
+            (wlRes.data['data'] as List).map((e) => Map<String, dynamic>.from(e as Map)),
+          );
+          if (loadedWishlists.isNotEmpty) {
+            await LocalDatabase().cacheWishlists(loadedWishlists);
+          }
+        }
+      } catch (_) {}
+      if (loadedWishlists.isEmpty) {
+        try {
+          loadedWishlists = await LocalDatabase().getCachedWishlists(
+            childId: widget.childData['id']?.toString(),
+            childAlias: (widget.childData['alias'] ?? widget.childData['name'])?.toString(),
+          );
+        } catch (_) {}
+      }
+
+      List<Map<String, dynamic>> loadedReceipts = [];
+      if (matched.isNotEmpty) {
+        try {
+          final allReceipts = await LocalDatabase().getReceipts();
+          loadedReceipts = allReceipts.where((r) {
+            final rName = (r['childName'] ?? '').toString().trim().toLowerCase();
+            return rName == childAlias || (childId.isNotEmpty && rName == childId);
+          }).toList();
+        } catch (_) {}
+
+        final rawBirth = (widget.childData['birth_date'] ?? '').toString().trim();
+        final parsedBirth = DateTime.tryParse(rawBirth);
+        if (parsedBirth != null) {
+          try {
+            await NotificationService().scheduleChildBirthdayReminder(
+              childId: childId.isNotEmpty ? childId : childAlias,
+              childAlias: (widget.childData['alias'] ?? widget.childData['name'] ?? 'Anak Asuh').toString(),
+              birthDate: parsedBirth,
+            );
+          } catch (_) {}
+        }
+      }
+
       if (mounted) {
         setState(() {
           _isSponsoredByMe = matched.isNotEmpty;
           _myTotalDonation = total;
           _myDonations = matched;
+          _childReports = loadedReports.take(3).toList();
+          _childWishlists = loadedWishlists;
+          _childReceipts = loadedReceipts;
         });
       }
     } catch (_) {}
@@ -124,6 +205,412 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
 
   String _formatRupiah(num value) {
     return 'Rp ${value.toInt().toString().replaceAllMapped(RegExp(r"(\d{1,3})(?=(\d{3})+(?!\d))"), (m) => "${m[1]}.")}';
+  }
+
+  Widget _buildWishlistCard(Map<String, dynamic> child) {
+    return Card(
+      elevation: 1.5,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.card_giftcard_outlined, color: AppColors.primary, size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Kebutuhan Spesifik Mendesak (Wishlist)',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 18),
+            if (_childWishlists.isEmpty)
+              const Text(
+                'Belum ada daftar kebutuhan spesifik mendesak saat ini.',
+                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              )
+            else
+              Column(
+                children: _childWishlists.map((w) {
+                  final itemName = (w['item_name'] ?? 'Kebutuhan Anak').toString();
+                  final est = (w['estimated_idr'] is num)
+                      ? (w['estimated_idr'] as num).toDouble()
+                      : double.tryParse(w['estimated_idr']?.toString() ?? '0') ?? 0.0;
+                  final status = (w['status'] ?? 'open').toString();
+                  final statusLabel = status == 'fulfilled'
+                      ? 'Sudah Disalurkan'
+                      : status == 'funded'
+                          ? 'Terpenuhi Donatur'
+                          : 'Butuh Dukungan';
+                  final statusColor = status == 'fulfilled'
+                      ? Colors.green
+                      : status == 'funded'
+                          ? Colors.blue
+                          : Colors.orange;
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(itemName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: statusColor.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                statusLabel,
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Estimasi: ${_formatRupiah(est)}',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.primaryDark),
+                        ),
+                        if (status == 'open') ...[
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => DonationFormScreen(
+                                      childData: child,
+                                      packageData: {
+                                        'id': 'pkg_wishlist',
+                                        'name': 'Wishlist: $itemName',
+                                        'monthly_idr': est,
+                                      },
+                                      wishlistItem: w,
+                                    ),
+                                  ),
+                                );
+                                await _checkSponsorshipStatus();
+                              },
+                              icon: const Icon(Icons.volunteer_activism, size: 16),
+                              label: const Text('Penuhi Kebutuhan Ini', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primary,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReceiptsCard() {
+    return Card(
+      elevation: 1.5,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.receipt_long_outlined, color: AppColors.primary, size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Jejak Penyaluran Dana',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 18),
+            if (_childReceipts.isEmpty)
+              const Text(
+                'Nota/bukti penyaluran dana dari pengurus panti akan tampil di sini setelah dana dibelanjakan.',
+                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              )
+            else
+              Column(
+                children: _childReceipts.map((r) {
+                  final imgRaw = (r['receiptImage'] ?? '').toString().trim();
+                  Widget thumb = const Icon(Icons.receipt, color: AppColors.primary, size: 28);
+                  if (imgRaw.startsWith('data:image')) {
+                    try {
+                      final bytes = base64Decode(imgRaw.split(',').last);
+                      thumb = ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.memory(bytes, width: 48, height: 48, fit: BoxFit.cover),
+                      );
+                    } catch (_) {}
+                  }
+                  final amt = (r['amount'] is num) ? (r['amount'] as num).toDouble() : 0.0;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        thumb,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text((r['title'] ?? 'Penyaluran Dana').toString(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                              Text(
+                                '${_formatRupiah(amt)} • ${(r['date'] ?? '').toString()}',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.primaryDark),
+                              ),
+                              if ((r['description'] ?? '').toString().isNotEmpty)
+                                Text(r['description'].toString(), style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showQuickPrayerSheet(String alias, String childId) async {
+    final controller = TextEditingController();
+    final presets = [
+      'Tetap semangat belajarnya ya $alias! 🎒',
+      'Semoga $alias sehat selalu dan makin berprestasi! 🌟',
+      'Kakak doakan cita-cita $alias segera tercapai. Aamiin 🤲',
+    ];
+    bool isGeneratingAi = false;
+
+    String donorName = 'Donatur Asuh';
+    try {
+      donorName = Provider.of<AuthProvider>(context, listen: false).userName;
+    } catch (_) {}
+
+    final messageToSend = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sCtx) => StatefulBuilder(
+        builder: (sCtx, setSheetState) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            20,
+            20,
+            MediaQuery.of(sCtx).viewInsets.bottom + 20,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Kirim Doa / Semangat untuk $alias',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: presets.map((p) {
+                    return ActionChip(
+                      label: Text(p, style: const TextStyle(fontSize: 11)),
+                      onPressed: () => controller.text = p,
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Tulis Pesan Doa atau Dukungan',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: isGeneratingAi
+                          ? null
+                          : () async {
+                              setSheetState(() => isGeneratingAi = true);
+                              final aiMsg = await GeminiService().generateLetter(
+                                childAlias: alias,
+                                topic: 'pesan doa dan semangat untuk $alias',
+                                donorName: donorName,
+                              );
+                              if (sCtx.mounted) {
+                                setSheetState(() {
+                                  controller.text = aiMsg;
+                                  isGeneratingAi = false;
+                                });
+                              }
+                            },
+                      icon: const Icon(Icons.auto_awesome, size: 16),
+                      label: Text(isGeneratingAi ? 'Menyusun...' : 'Buat dengan AI', style: const TextStyle(fontSize: 12)),
+                    ),
+                    const Spacer(),
+                    ElevatedButton.icon(
+                      onPressed: () => Navigator.pop(sCtx, controller.text.trim()),
+                      icon: const Icon(Icons.send, size: 16),
+                      label: const Text('Kirim ke Ruang Kasih', style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    controller.dispose();
+
+    if (messageToSend == null || messageToSend.isEmpty) return;
+
+    try {
+      await LocalDatabase().insertChatMessage(
+        childAlias: alias,
+        sender: 'donor',
+        text: messageToSend,
+      );
+    } catch (_) {}
+    try {
+      await DioClient().dio.post('/letters', data: {
+        if (childId.isNotEmpty) 'child_id': childId,
+        'child_alias': alias,
+        'sender': 'donor',
+        'text': messageToSend,
+        'type': 'text',
+      });
+    } catch (_) {}
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Doa & semangat berhasil dikirim untuk $alias! 💛'),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+    }
+  }
+
+  Future<void> _activateBirthdayReminder(String alias, String childId, String rawBirthDate) async {
+    final parsed = DateTime.tryParse(rawBirthDate);
+    if (parsed == null) return;
+    try {
+      await NotificationService().scheduleChildBirthdayReminder(
+        childId: childId.isNotEmpty ? childId : alias,
+        childAlias: alias,
+        birthDate: parsed,
+      );
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Pengingat Ulang Tahun $alias (${parsed.day}/${parsed.month}) aktif! 🎂'),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+    }
+  }
+
+  Widget _buildPrayerAndBirthdayCard(Map<String, dynamic> child, String alias) {
+    final childId = (child['id'] ?? '').toString();
+    final rawBirthDate = (child['birth_date'] ?? '').toString().trim();
+    final hasBirthDate = rawBirthDate.isNotEmpty && DateTime.tryParse(rawBirthDate) != null;
+
+    return Card(
+      elevation: 1.5,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.favorite_outline, color: AppColors.primary, size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Doa, Semangat & Momen Spesial',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton.icon(
+              onPressed: () => _showQuickPrayerSheet(alias, childId),
+              icon: const Icon(Icons.volunteer_activism, size: 18),
+              label: const Text('Kirim Doa / Semangat', style: TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+            if (hasBirthDate) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => _activateBirthdayReminder(alias, childId, rawBirthDate),
+                icon: const Icon(Icons.cake_outlined, size: 18),
+                label: Text('Pasang Pengingat Ulang Tahun ($rawBirthDate)', style: const TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primaryDark,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -399,6 +886,123 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                   ),
                   const SizedBox(height: 16),
 
+                  Card(
+                    elevation: 1.5,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.newspaper_outlined, color: AppColors.primary, size: 20),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Text(
+                                  'Jejak Perkembangan Terbaru',
+                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ProgressFeedScreen(
+                                        filterChildId: child['id']?.toString(),
+                                        filterChildAlias: alias,
+                                      ),
+                                    ),
+                                  );
+                                },
+                                child: const Text('Lihat Semua Kabar', style: TextStyle(fontSize: 12)),
+                              ),
+                            ],
+                          ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => ChildGalleryScreen(
+                                      childId: (child['id'] ?? '').toString(),
+                                      childAlias: alias,
+                                      isAdmin: Provider.of<AuthProvider>(context, listen: false).isAdmin,
+                                    ),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.photo_library_outlined, size: 16),
+                              label: const Text('Lihat Galeri Karya', style: TextStyle(fontSize: 12)),
+                            ),
+                          ),
+                          const Divider(height: 16),
+                          if (_childReports.isEmpty)
+                            const Text(
+                              'Belum ada kabar perkembangan terbaru untuk anak ini.',
+                              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                            )
+                          else
+                            Column(
+                              children: _childReports.map((rep) {
+                                final title = (rep['title'] ?? '').toString().isNotEmpty
+                                    ? rep['title'].toString()
+                                    : 'Kabar Terbaru';
+                                final category = (rep['category'] ?? 'Kegiatan').toString();
+                                final summary = (rep['summary'] ?? '').toString();
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.surfaceLight,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.primary.withValues(alpha: 0.12),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text(category, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primaryDark)),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                                          ),
+                                        ],
+                                      ),
+                                      if (summary.isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Text(summary, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                                      ],
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  _buildPrayerAndBirthdayCard(child, alias),
+                  const SizedBox(height: 16),
+
+                  _buildWishlistCard(child),
+                  if (_isSponsoredByMe) ...[
+                    const SizedBox(height: 16),
+                    _buildReceiptsCard(),
+                  ],
+                  const SizedBox(height: 16),
 
                   Card(
                     elevation: 1.5,
@@ -474,7 +1078,7 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'Dukungan Anda disalurkan secara transparan dan tercatat di blockchain ledger.',
+                    'Dukungan Anda disalurkan secara transparan dengan bukti penyaluran resmi panti.',
                     style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                   ),
                   const SizedBox(height: 12),

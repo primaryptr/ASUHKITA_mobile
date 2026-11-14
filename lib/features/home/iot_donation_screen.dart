@@ -88,7 +88,7 @@ class _IotDonationScreenState extends State<IotDonationScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Sensor IR ESP32 Mendeteksi Uang Masuk Rp ${nominal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}! Data disimpan ke memori IoT & Ledger.'),
+        content: Text('Sensor IR ESP32 Mendeteksi Uang Masuk Rp ${nominal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}! Data disimpan ke memori IoT.'),
         backgroundColor: AppColors.primary,
       ),
     );
@@ -225,7 +225,7 @@ class _IotDonationScreenState extends State<IotDonationScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(ev['device_name']),
-                      Text('Blok Hash: ${ev['block_hash']}', style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
+                      Text('ID Perangkat: ${ev['id'] ?? 'IOT-ESP32'}', style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
                     ],
                   ),
                   trailing: Text(ev['timestamp'].toString().substring(11), style: const TextStyle(fontSize: 12, color: Colors.grey)),

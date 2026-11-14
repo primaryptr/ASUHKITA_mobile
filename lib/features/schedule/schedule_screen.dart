@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/app_colors.dart';
+import '../../core/dio_client.dart';
 
 import 'package:intl/intl.dart';
 
@@ -26,6 +27,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   final _topicController = TextEditingController();
 
   List<String> _sponsoredChildren = [];
+  List<Map<String, dynamic>> _schedules = [];
   String? _selectedChild;
   bool _isLoading = true;
 
@@ -58,6 +60,31 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     super.dispose();
   }
 
+  Future<void> _loadSchedules() async {
+    List<Map<String, dynamic>> items = [];
+    try {
+      final res = await DioClient().dio.get('/orphanages/schedules');
+      if (res.statusCode == 200 && res.data is Map && res.data['data'] is List) {
+        items = List<Map<String, dynamic>>.from(
+          (res.data['data'] as List).map((e) => Map<String, dynamic>.from(e as Map)),
+        );
+        for (final s in items) {
+          await LocalDatabase().upsertScheduleLocal(s);
+        }
+      }
+    } catch (_) {}
+
+    if (items.isEmpty) {
+      try {
+        items = await LocalDatabase().getCachedSchedules();
+      } catch (_) {}
+    }
+
+    if (mounted) {
+      setState(() => _schedules = items);
+    }
+  }
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
@@ -81,7 +108,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           setState(() {
             _sponsoredChildren = setNames.toList();
             _reportTarget = _sponsoredChildren.first;
-            _isLoading = false;
           });
         }
       } else {
@@ -102,7 +128,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             final isMatch =
                 (userEmail.isNotEmpty && dEmail == userEmail) ||
                 (userName.isNotEmpty &&
-                    (dName == userName || dName == userEmail));
+                    (dName == userName || dName == mySafeName(userEmail)));
             if (isMatch) {
               final alias = (d['child_alias'] ?? '').toString().trim();
               if (alias.isNotEmpty) {
@@ -120,14 +146,17 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           setState(() {
             _sponsoredChildren = list;
             _selectedChild = list.isNotEmpty ? list.first : null;
-            _isLoading = false;
           });
         }
       }
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+      await _loadSchedules();
+    } catch (_) {}
+    if (mounted) {
+      setState(() => _isLoading = false);
     }
   }
+
+  String mySafeName(String email) => email;
 
   Future<void> _pickDateTime() async {
     final pickedDate = await showDatePicker(
@@ -382,7 +411,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               ElevatedButton(
                 onPressed: () {
                   Navigator.pop(ctx);
-                  Navigator.pop(context);
+                  if (Navigator.of(context).canPop()) {
+                    Navigator.pop(context);
+                  }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
@@ -454,6 +485,34 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         );
       }
       return;
+    }
+
+    final newSchedule = <String, dynamic>{
+      'id': 'sch_${DateTime.now().millisecondsSinceEpoch}',
+      'sponsorship_id': 'sp-seed-001',
+      'child_alias': targetChild,
+      'donor_name': auth.userName,
+      'scheduled_at_utc': _selectedDateTime.toUtc().toIso8601String(),
+      'donor_timezone': 'WIB',
+      'status': 'scheduled',
+      'notes': topic,
+      'admin_notes': '',
+      'created_at': DateTime.now().toIso8601String(),
+    };
+    try {
+      final res = await DioClient().dio.post('/orphanages/schedules', data: {
+        'sponsorship_id': 'sp-seed-001',
+        'scheduled_at_utc': newSchedule['scheduled_at_utc'],
+        'donor_timezone': 'Asia/Jakarta',
+        'notes': topic,
+      });
+      if (res.statusCode == 201 && res.data is Map && res.data['data']?['schedule'] is Map) {
+        newSchedule['id'] = res.data['data']['schedule']['id']?.toString() ?? newSchedule['id'];
+      }
+    } catch (_) {}
+    await LocalDatabase().upsertScheduleLocal(newSchedule);
+    if (mounted) {
+      setState(() => _schedules.insert(0, newSchedule));
     }
 
 
@@ -615,7 +674,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                Navigator.pop(context);
+                if (Navigator.of(context).canPop()) {
+                  Navigator.pop(context);
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
@@ -629,30 +690,174 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     }
   }
 
+  Map<String, dynamic> _statusStyle(String status) {
+    switch (status) {
+      case 'approved':
+        return {'label': 'Disetujui', 'color': Colors.green};
+      case 'rescheduled':
+        return {'label': 'Dijadwalkan Ulang', 'color': Colors.orange};
+      case 'completed':
+        return {'label': 'Selesai', 'color': Colors.blue};
+      default:
+        return {'label': 'Menunggu', 'color': Colors.amber.shade800};
+    }
+  }
+
+  Future<void> _updateScheduleStatus(Map<String, dynamic> schedule, String nextStatus) async {
+    final notesCtrl = TextEditingController(text: (schedule['admin_notes'] ?? '').toString());
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: Text('Update Jadwal (${_statusStyle(nextStatus)['label']})', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: notesCtrl,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            labelText: 'Catatan Pengurus Panti untuk Donatur',
+            hintText: 'Contoh: Siap jam 17:00 WIB / tautan zoom disiapkan',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+    final adminNotes = notesCtrl.text.trim();
+    notesCtrl.dispose();
+    if (confirmed != true) return;
+
+    final id = (schedule['id'] ?? '').toString();
+    if (id.isNotEmpty) {
+      try {
+        await DioClient().dio.patch('/orphanages/schedules/$id/status', data: {
+          'status': nextStatus,
+          'admin_notes': adminNotes,
+        });
+      } catch (_) {}
+    }
+
+    final updated = {
+      ...schedule,
+      'status': nextStatus,
+      'admin_notes': adminNotes,
+    };
+    await LocalDatabase().upsertScheduleLocal(updated);
+    if (mounted) {
+      setState(() {
+        final idx = _schedules.indexWhere((s) => s['id'] == schedule['id']);
+        if (idx >= 0) _schedules[idx] = updated;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Status jadwal diperbarui menjadi ${_statusStyle(nextStatus)['label']}'), backgroundColor: AppColors.primary),
+      );
+    }
+  }
+
+  Widget _buildAdminQueueTab() {
+    if (_schedules.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Belum ada pengajuan video call dari donatur.',
+            style: TextStyle(color: AppColors.textSecondary),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _schedules.length,
+      itemBuilder: (context, idx) {
+        final s = _schedules[idx];
+        final st = _statusStyle((s['status'] ?? 'scheduled').toString());
+        final stColor = st['color'] as Color;
+        final childName = (s['child_alias'] ?? 'Anak Asuh').toString();
+        final donorName = (s['donor_name'] ?? 'Donatur').toString();
+        final notes = (s['notes'] ?? '').toString();
+        final adminNotes = (s['admin_notes'] ?? '').toString();
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        childName,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: stColor.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        st['label'] as String,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: stColor),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text('Donatur: $donorName', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                Text('Waktu UTC: ${(s['scheduled_at_utc'] ?? '').toString()}', style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                if (notes.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text('Topik: $notes', style: const TextStyle(fontSize: 12)),
+                ],
+                if (adminNotes.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text('Catatan Panti: $adminNotes', style: const TextStyle(fontSize: 12, color: AppColors.primaryDark, fontWeight: FontWeight.w600)),
+                ],
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    OutlinedButton(
+                      onPressed: () => _updateScheduleStatus(s, 'approved'),
+                      child: const Text('Setujui', style: TextStyle(fontSize: 11)),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => _updateScheduleStatus(s, 'rescheduled'),
+                      child: const Text('Jadwal Ulang', style: TextStyle(fontSize: 11)),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => _updateScheduleStatus(s, 'completed'),
+                      child: const Text('Selesai', style: TextStyle(fontSize: 11)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = Provider.of<AuthProvider>(context);
     final bool isAdmin = auth.userRole == 'admin_panti';
     final utcTime = _selectedDateTime.toUtc();
 
-    return Scaffold(
-      backgroundColor: Colors.grey.shade50,
-      appBar: AppBar(
-        title: Text(
-          isAdmin
-              ? 'Jadwal Lap. Keuangan 4 Zona'
-              : 'Jadwal Video Call 4 Zona Waktu',
-        ),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-      ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: AppColors.primary),
-            )
-          : SafeArea(
-              child: SingleChildScrollView(
+    final formBody = SafeArea(
+      child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 48.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1090,11 +1295,100 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       ),
                     ),
                     ),
+                    if (!isAdmin) ...[
+                      const SizedBox(height: 20),
+                      const Text(
+                        'Status Pengajuan Video Call',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                      ),
+                      const SizedBox(height: 8),
+                      if (_schedules.isEmpty)
+                        const Text(
+                          'Belum ada pengajuan video call yang tercatat.',
+                          style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                        )
+                      else
+                        ..._schedules.map((s) {
+                          final st = _statusStyle((s['status'] ?? 'scheduled').toString());
+                          final stColor = st['color'] as Color;
+                          final adminNotes = (s['admin_notes'] ?? '').toString();
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            child: ListTile(
+                              title: Text((s['child_alias'] ?? 'Anak Asuh').toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text((s['scheduled_at_utc'] ?? '').toString(), style: const TextStyle(fontSize: 11)),
+                                  if (adminNotes.isNotEmpty)
+                                    Text('Pesan Panti: $adminNotes', style: const TextStyle(fontSize: 12, color: AppColors.primaryDark, fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                              trailing: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: stColor.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  st['label'] as String,
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: stColor),
+                                ),
+                              ),
+                            ),
+                          );
+                        }),
+                    ],
                     const SizedBox(height: 32),
                 ],
               ),
               ),
+            );
+
+    if (isAdmin) {
+      return DefaultTabController(
+        length: 2,
+        child: Scaffold(
+          backgroundColor: Colors.grey.shade50,
+          appBar: AppBar(
+            title: const Text('Koordinasi Jadwal & Audit'),
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            bottom: const TabBar(
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.white70,
+              indicatorColor: Colors.white,
+              tabs: [
+                Tab(text: 'Antrean Jadwal Donatur'),
+                Tab(text: 'Pengingat Audit Kas'),
+              ],
             ),
+          ),
+          body: _isLoading
+              ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+              : TabBarView(
+                  children: [
+                    _buildAdminQueueTab(),
+                    formBody,
+                  ],
+                ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.grey.shade50,
+      appBar: AppBar(
+        title: const Text('Jadwal Video Call 4 Zona Waktu'),
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          : formBody,
     );
   }
 }

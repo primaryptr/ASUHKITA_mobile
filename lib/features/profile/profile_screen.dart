@@ -771,6 +771,110 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  void _showLogoutDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.logout, color: Colors.redAccent),
+            SizedBox(width: 8),
+            Text('Konfirmasi Keluar'),
+          ],
+        ),
+        content: const Text(
+          'Apakah Anda yakin ingin keluar dari akun AsuhKita? Sesi Anda akan dicabut secara aman.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (loadingCtx) => PopScope(
+                  canPop: false,
+                  child: Dialog(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    backgroundColor: Colors.white,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 64,
+                            height: 64,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: LinearGradient(
+                                colors: [AppColors.primary, AppColors.secondary],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                            ),
+                            child: const Center(
+                              child: Icon(
+                                Icons.volunteer_activism,
+                                color: Colors.white,
+                                size: 36,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          const Text(
+                            'Keluar dari AsuhKita...',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Membersihkan sesi secara aman',
+                            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+
+              final auth = Provider.of<AuthProvider>(context, listen: false);
+              await Future.delayed(const Duration(milliseconds: 250));
+              await auth.logout();
+
+              if (mounted) {
+                Navigator.of(context, rootNavigator: true).pop();
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Ya, Keluar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = Provider.of<AuthProvider>(context);
@@ -1067,7 +1171,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               const SizedBox(height: 20),
 
-
               Card(
                 elevation: 1,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1189,7 +1292,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 20),
               ],
 
-
               Card(
                 elevation: 1,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1208,10 +1310,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         value: auth.isBiometricEnabled,
                         activeThumbColor: AppColors.primary,
                         onChanged: (val) async {
+                          final messenger = ScaffoldMessenger.of(context);
                           if (val) {
                             final ok = await auth.registerBiometricPrompt();
                             if (ok && mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
+                              messenger.showSnackBar(
                                 const SnackBar(
                                   content: Text('Sidik jari berhasil didaftarkan dan diaktifkan!'),
                                   backgroundColor: AppColors.primary,
@@ -1221,7 +1324,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           } else {
                             auth.toggleBiometric(false);
                             if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
+                              messenger.showSnackBar(
                                 const SnackBar(
                                   content: Text('Login biometrik dinonaktifkan.'),
                                 ),
@@ -1234,6 +1337,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _showLogoutDialog,
+                  icon: const Icon(Icons.logout, color: Colors.redAccent),
+                  label: const Text(
+                    'Keluar dari Akun',
+                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.redAccent),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
             ],
           ),
         ),

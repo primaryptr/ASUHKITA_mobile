@@ -247,17 +247,25 @@ const createSchedule = async (req, res, next) => {
 
 const getSchedules = async (req, res, next) => {
   try {
-    const result = await query(
-      `SELECT cs.*, c.alias AS child_alias, o.name AS orphanage_name
-       FROM call_schedules cs
-       JOIN sponsorships s ON cs.sponsorship_id = s.id
-       JOIN children c ON s.child_id = c.id
-       JOIN orphanages o ON c.orphanage_id = o.id
-       WHERE s.user_id = $1
-       ORDER BY cs.scheduled_at_utc ASC`,
-      [req.user.id]
-    );
+    const isAdmin = req.user?.role === 'admin_panti';
+    const sql = isAdmin
+      ? `SELECT cs.*, c.alias AS child_alias, o.name AS orphanage_name,
+                u.name AS donor_name, u.email AS donor_email
+         FROM call_schedules cs
+         LEFT JOIN sponsorships s ON cs.sponsorship_id = s.id
+         LEFT JOIN children c ON s.child_id = c.id
+         LEFT JOIN orphanages o ON c.orphanage_id = o.id
+         LEFT JOIN users u ON s.user_id = u.id
+         ORDER BY cs.scheduled_at_utc ASC`
+      : `SELECT cs.*, c.alias AS child_alias, o.name AS orphanage_name
+         FROM call_schedules cs
+         JOIN sponsorships s ON cs.sponsorship_id = s.id
+         JOIN children c ON s.child_id = c.id
+         JOIN orphanages o ON c.orphanage_id = o.id
+         WHERE s.user_id = $1
+         ORDER BY cs.scheduled_at_utc ASC`;
 
+    const result = await query(sql, isAdmin ? [] : [req.user.id]);
 
     const schedulesWithTimezones = result.rows.map(s => ({
       ...s,
@@ -267,6 +275,61 @@ const getSchedules = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       data: schedulesWithTimezones,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const updateScheduleStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status, scheduled_at_utc, admin_notes } = req.body;
+    const allowed = ['scheduled', 'approved', 'rescheduled', 'completed'];
+
+    if (!allowed.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Status jadwal harus salah satu dari: scheduled, approved, rescheduled, completed.',
+        error: 'INVALID_STATUS',
+      });
+    }
+
+    let nextIso = null;
+    if (scheduled_at_utc) {
+      const parsed = new Date(scheduled_at_utc);
+      if (isNaN(parsed.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Format scheduled_at_utc tidak valid.',
+          error: 'INVALID_DATE',
+        });
+      }
+      nextIso = parsed.toISOString();
+    }
+
+    const result = await query(
+      `UPDATE call_schedules
+       SET status = $1,
+           scheduled_at_utc = COALESCE($2, scheduled_at_utc),
+           admin_notes = COALESCE($3, admin_notes)
+       WHERE id = $4
+       RETURNING *`,
+      [status, nextIso, admin_notes !== undefined ? String(admin_notes) : '', id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Jadwal tidak ditemukan.',
+        error: 'NOT_FOUND',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Status koordinasi jadwal berhasil diperbarui.',
+      data: result.rows[0],
     });
   } catch (err) {
     next(err);
@@ -313,4 +376,11 @@ const convertToFourTimezones = (utcDate) => {
   };
 };
 
-module.exports = { getNearbyOrphanages, getAllOrphanages, checkIn, createSchedule, getSchedules };
+module.exports = {
+  getNearbyOrphanages,
+  getAllOrphanages,
+  checkIn,
+  createSchedule,
+  getSchedules,
+  updateScheduleStatus,
+};

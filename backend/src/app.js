@@ -11,7 +11,6 @@ const rateLimit = require('express-rate-limit');
 
 const authRoutes       = require('./routes/auth.routes');
 const profileRoutes    = require('./routes/profile.routes');
-const feedbackRoutes   = require('./routes/feedback.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const childrenRoutes   = require('./routes/children.routes');
 const donationsRoutes  = require('./routes/donations.routes');
@@ -20,6 +19,8 @@ const orphanagesRoutes = require('./routes/orphanages.routes');
 const gameRoutes       = require('./routes/game.routes');
 const iotRoutes        = require('./routes/iot.routes');
 const lettersRoutes    = require('./routes/letters.routes');
+const reportsRoutes    = require('./routes/reports.routes');
+const wishlistsRoutes  = require('./routes/wishlists.routes');
 const aiRoutes         = require('./routes/ai.routes');
 const { errorHandler, notFoundHandler } = require('./middlewares/error.middleware');
 
@@ -111,7 +112,6 @@ app.use('/uploads', require('express').static(path.join(__dirname, '../uploads')
 
 app.use('/api/auth',        authLimiter, authRoutes);
 app.use('/api/users/profile', profileRoutes);
-app.use('/api/feedback',    feedbackRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/children',    childrenRoutes);
 app.use('/api/donations',   donationsRoutes);
@@ -120,6 +120,8 @@ app.use('/api/orphanages',  orphanagesRoutes);
 app.use('/api/game',        gameRoutes);
 app.use('/api/iot',         iotRoutes);
 app.use('/api/letters',     lettersRoutes);
+app.use('/api/reports',     reportsRoutes);
+app.use('/api/wishlists',   wishlistsRoutes);
 app.use('/api/ai',          aiRoutes);
 
 

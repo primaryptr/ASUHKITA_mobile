@@ -53,14 +53,14 @@ const mockDb = {
     { id: 'orp-005', name: 'Panti Asuhan Harapan Baru', city: 'Semarang',   address: 'Jl. Pemuda No. 88', latitude: -6.9932, longitude: 110.4203, phone: '024-555555', description: 'Aktif sejak 2005' },
   ],
   children: [
-    { id: 'ch-001', orphanage_id: 'orp-001', alias: 'Bintang', age: 10, gender: 'L', need_category: 'Pendidikan', story_summary: 'Bintang cita-cita jadi dokter.', avatar: 'avatar_bintang.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Al-Ikhlas', orphanage_city: 'Jakarta' },
-    { id: 'ch-002', orphanage_id: 'orp-001', alias: 'Bulan',   age: 8,  gender: 'P', need_category: 'Gizi',       story_summary: 'Bulan senang menggambar.', avatar: 'avatar_bulan.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Al-Ikhlas', orphanage_city: 'Jakarta' },
-    { id: 'ch-003', orphanage_id: 'orp-002', alias: 'Awan',    age: 12, gender: 'L', need_category: 'Kesehatan',  story_summary: 'Awan semangat belajar meski sering sakit.', avatar: 'avatar_awan.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Cahaya Hati', orphanage_city: 'Bandung' },
-    { id: 'ch-004', orphanage_id: 'orp-002', alias: 'Mentari', age: 9,  gender: 'P', need_category: 'Pendidikan', story_summary: 'Mentari ingin jadi guru.', avatar: 'avatar_mentari.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Cahaya Hati', orphanage_city: 'Bandung' },
-    { id: 'ch-005', orphanage_id: 'orp-003', alias: 'Langit',  age: 11, gender: 'L', need_category: 'Umum',       story_summary: 'Langit suka musik.', avatar: 'avatar_langit.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Bunga Bangsa', orphanage_city: 'Surabaya' },
-    { id: 'ch-006', orphanage_id: 'orp-003', alias: 'Pelangi', age: 7,  gender: 'P', need_category: 'Gizi',       story_summary: 'Pelangi anak ceria.', avatar: 'avatar_pelangi.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Bunga Bangsa', orphanage_city: 'Surabaya' },
-    { id: 'ch-007', orphanage_id: 'orp-004', alias: 'Rizky',   age: 13, gender: 'L', need_category: 'Pendidikan', story_summary: 'Rizky berprestasi di sekolah.', avatar: 'avatar_rizky.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Tunas Muda', orphanage_city: 'Yogyakarta' },
-    { id: 'ch-008', orphanage_id: 'orp-005', alias: 'Sari',    age: 10, gender: 'P', need_category: 'Kesehatan',  story_summary: 'Sari butuh biaya kesehatan rutin.', avatar: 'avatar_sari.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Harapan Baru', orphanage_city: 'Semarang' },
+    { id: 'ch-001', orphanage_id: 'orp-001', alias: 'Bintang', age: 10, gender: 'L', need_category: 'Pendidikan', story_summary: 'Bintang cita-cita jadi dokter.', avatar: 'avatar_bintang.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Al-Ikhlas', orphanage_city: 'Jakarta', daily_status: 'Semangat belajar IPA hari ini 📚', birth_date: '2016-05-12' },
+    { id: 'ch-002', orphanage_id: 'orp-001', alias: 'Bulan',   age: 8,  gender: 'P', need_category: 'Gizi',       story_summary: 'Bulan senang menggambar.', avatar: 'avatar_bulan.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Al-Ikhlas', orphanage_city: 'Jakarta', daily_status: 'Lagi suka menggambar pemandangan 🎨', birth_date: '2018-11-20' },
+    { id: 'ch-003', orphanage_id: 'orp-002', alias: 'Awan',    age: 12, gender: 'L', need_category: 'Kesehatan',  story_summary: 'Awan semangat belajar meski sering sakit.', avatar: 'avatar_awan.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Cahaya Hati', orphanage_city: 'Bandung', daily_status: 'Sehat dan aktif olahraga pagi ⚽', birth_date: '2014-03-08' },
+    { id: 'ch-004', orphanage_id: 'orp-002', alias: 'Mentari', age: 9,  gender: 'P', need_category: 'Pendidikan', story_summary: 'Mentari ingin jadi guru.', avatar: 'avatar_mentari.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Cahaya Hati', orphanage_city: 'Bandung', daily_status: 'Rajin membaca buku cerita 📖', birth_date: '2017-07-14' },
+    { id: 'ch-005', orphanage_id: 'orp-003', alias: 'Langit',  age: 11, gender: 'L', need_category: 'Umum',       story_summary: 'Langit suka musik.', avatar: 'avatar_langit.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Bunga Bangsa', orphanage_city: 'Surabaya', daily_status: 'Latihan gitar sore bersama teman 🎸', birth_date: '2015-09-02' },
+    { id: 'ch-006', orphanage_id: 'orp-003', alias: 'Pelangi', age: 7,  gender: 'P', need_category: 'Gizi',       story_summary: 'Pelangi anak ceria.', avatar: 'avatar_pelangi.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Bunga Bangsa', orphanage_city: 'Surabaya', daily_status: 'Ceria setelah makan siang bergizi 🍱', birth_date: '2019-01-25' },
+    { id: 'ch-007', orphanage_id: 'orp-004', alias: 'Rizky',   age: 13, gender: 'L', need_category: 'Pendidikan', story_summary: 'Rizky berprestasi di sekolah.', avatar: 'avatar_rizky.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Tunas Muda', orphanage_city: 'Yogyakarta', daily_status: 'Persiapan lomba olimpiade sains 🏅', birth_date: '2013-08-17' },
+    { id: 'ch-008', orphanage_id: 'orp-005', alias: 'Sari',    age: 10, gender: 'P', need_category: 'Kesehatan',  story_summary: 'Sari butuh biaya kesehatan rutin.', avatar: 'avatar_sari.png', status: 'Tersedia', orphanage_name: 'Panti Asuhan Harapan Baru', orphanage_city: 'Semarang', daily_status: 'Kondisi stabil dan ceria 💚', birth_date: '2016-12-03' },
   ],
   sponsorship_packages: [
     { id: 'pkg-001', category: 'Pendidikan', name: 'Paket Buku & Alat Tulis',  amount_idr: 150000, description: 'Buku pelajaran dan perlengkapan sekolah' },
@@ -94,6 +94,48 @@ const mockDb = {
   iot_events: [],
   call_schedules: [],
   letters: [],
+  progress_reports: [
+    {
+      id: 'rep-seed-001',
+      child_id: 'ch-001',
+      child_alias: 'Bintang',
+      orphanage_name: 'Panti Asuhan Al-Ikhlas',
+      title: 'Juara 1 Cerdas Cermat Tingkat Kecamatan',
+      category: 'Prestasi',
+      period: '2026-11',
+      summary: 'Bintang berhasil membawa pulang piala juara 1 lomba cerdas cermat IPA mewakili sekolahnya.',
+      evidence_url: '',
+      author_name: 'Admin Al-Ikhlas',
+      ledger_ref: null,
+      created_at: new Date().toISOString(),
+    },
+  ],
+  child_wishlists: [
+    {
+      id: 'wl-seed-001',
+      child_id: 'ch-001',
+      child_alias: 'Bintang',
+      item_name: 'Sepatu Sekolah & Tas Ransel Baru',
+      estimated_idr: 185000,
+      status: 'open',
+      funded_by_user_id: null,
+      funded_by_name: null,
+      receipt_url: '',
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: 'wl-seed-002',
+      child_id: 'ch-002',
+      child_alias: 'Bulan',
+      item_name: 'Set Alat Lukis & Kertas Gambar',
+      estimated_idr: 95000,
+      status: 'open',
+      funded_by_user_id: null,
+      funded_by_name: null,
+      receipt_url: '',
+      created_at: new Date().toISOString(),
+    },
+  ],
   exchange_rates: [
     { currency: 'USD', rate_to_idr: 16000 },
     { currency: 'SGD', rate_to_idr: 12000 },
@@ -191,6 +233,16 @@ const executeMockQuery = (text, params = []) => {
     return { rows, rowCount: rows.length };
   }
 
+
+  if (sql.includes('UPDATE CHILDREN') && sql.includes('DAILY_STATUS')) {
+    const [daily_status, idOrAlias] = params;
+    const idx = mockDb.children.findIndex(
+      c => c.id === idOrAlias || c.alias.toLowerCase() === String(idOrAlias).toLowerCase(),
+    );
+    if (idx < 0) return { rows: [], rowCount: 0 };
+    mockDb.children[idx].daily_status = daily_status;
+    return { rows: [mockDb.children[idx]], rowCount: 1 };
+  }
 
   if (sql.includes('FROM CHILDREN') || (sql.includes('FROM CHILDREN C') && sql.includes('JOIN ORPHANAGES'))) {
     let rows = mockDb.children.map(c => ({ ...c }));
@@ -563,51 +615,126 @@ const executeMockQuery = (text, params = []) => {
   }
 
 
+  if (sql.includes('UPDATE CALL_SCHEDULES')) {
+    const [status, scheduled_at_utc, admin_notes, id] = params;
+    const idx = mockDb.call_schedules.findIndex(s => s.id === id);
+    if (idx < 0) return { rows: [], rowCount: 0 };
+    mockDb.call_schedules[idx] = {
+      ...mockDb.call_schedules[idx],
+      status: status || mockDb.call_schedules[idx].status,
+      scheduled_at_utc: scheduled_at_utc || mockDb.call_schedules[idx].scheduled_at_utc,
+      admin_notes: admin_notes !== undefined ? admin_notes : (mockDb.call_schedules[idx].admin_notes || ''),
+    };
+    return { rows: [mockDb.call_schedules[idx]], rowCount: 1 };
+  }
+
+
   if (sql.includes('FROM CALL_SCHEDULES') || sql.includes('CALL_SCHEDULES CS')) {
-    const rows = mockDb.call_schedules;
+    let rows = mockDb.call_schedules.map(s => {
+      const sp = mockDb.sponsorships.find(x => x.id === s.sponsorship_id);
+      const child = mockDb.children.find(c => c.id === (s.child_id || sp?.child_id));
+      const user = mockDb.users.find(u => u.id === (s.user_id || sp?.user_id));
+      return {
+        ...s,
+        user_id: s.user_id || sp?.user_id || null,
+        child_id: s.child_id || sp?.child_id || null,
+        child_alias: s.child_alias || child?.alias || 'Anak Asuh',
+        donor_name: s.donor_name || user?.name || 'Donatur Asuh',
+        donor_email: s.donor_email || user?.email || '',
+        admin_notes: s.admin_notes || '',
+      };
+    });
+    if (sql.includes('S.USER_ID = $1') && params[0]) {
+      rows = rows.filter(r => r.user_id === params[0]);
+    }
     return { rows, rowCount: rows.length };
   }
 
 
   if (sql.includes('INSERT INTO CALL_SCHEDULES')) {
     const [sponsorship_id, scheduled_at_utc, donor_timezone, notes] = params;
-    const s = { id: generateMockId(), sponsorship_id, scheduled_at_utc, donor_timezone, notes, status: 'scheduled', created_at: new Date().toISOString() };
+    const sp = mockDb.sponsorships.find(x => x.id === sponsorship_id);
+    const child = mockDb.children.find(c => c.id === sp?.child_id);
+    const user = mockDb.users.find(u => u.id === sp?.user_id);
+    const s = {
+      id: generateMockId(),
+      sponsorship_id,
+      user_id: sp?.user_id || null,
+      child_id: sp?.child_id || null,
+      child_alias: child?.alias || 'Anak Asuh',
+      donor_name: user?.name || 'Donatur Asuh',
+      donor_email: user?.email || '',
+      scheduled_at_utc,
+      donor_timezone,
+      notes,
+      admin_notes: '',
+      status: 'scheduled',
+      created_at: new Date().toISOString(),
+    };
     mockDb.call_schedules.push(s);
     return { rows: [s], rowCount: 1 };
   }
 
 
-  if (sql.includes('FROM LETTERS') && sql.includes('USER_ID =') && !sql.includes('INSERT') && !sql.includes('DELETE')) {
-    const userId = params[0];
-    let rows = mockDb.letters.filter(l => l.user_id === userId);
+  if (sql.includes('FROM LETTERS') && !sql.includes('INSERT') && !sql.includes('DELETE')) {
+    let rows = [...mockDb.letters];
+    if (sql.includes('WHERE L.ID =')) {
+      const letterId = params[0];
+      const userId = params[1];
+      rows = rows.filter(l => l.id === letterId && (!userId || l.user_id === userId));
+    } else if (sql.includes('USER_ID =')) {
+      const userId = params[0];
+      rows = rows.filter(l => l.user_id === userId);
+      if (params[1]) {
+        rows = rows.filter(l => l.child_id === params[1]);
+      }
+    } else if (sql.includes('CHILD_ID =') && params[0]) {
+      rows = rows.filter(l => l.child_id === params[0]);
+    }
 
-    if (params[1]) {
-      rows = rows.filter(l => l.child_id === params[1]);
+    if (sql.includes('IS_GALLERY_ITEM = TRUE')) {
+      rows = rows.filter(l => l.is_gallery_item === true || (l.file_url && l.file_url.length > 0));
     }
 
     rows = rows.map(l => {
       const child = mockDb.children.find(c => c.id === l.child_id);
-      return { ...l, child_alias: child?.alias || 'Unknown' };
+      return {
+        sender_role: 'donor',
+        msg_type: 'text',
+        file_url: '',
+        is_gallery_item: false,
+        ...l,
+        child_alias: child?.alias || 'Unknown',
+      };
     });
     rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     return { rows, rowCount: rows.length };
   }
 
 
-  if (sql.includes('FROM LETTERS') && sql.includes('WHERE L.ID =')) {
-    const letterId = params[0]; const userId = params[1];
-    let rows = mockDb.letters.filter(l => l.id === letterId && l.user_id === userId);
-    rows = rows.map(l => {
-      const child = mockDb.children.find(c => c.id === l.child_id);
-      return { ...l, child_alias: child?.alias || 'Unknown' };
-    });
-    return { rows, rowCount: rows.length };
-  }
-
-
   if (sql.includes('INSERT INTO LETTERS')) {
-    const [user_id, child_id, content, ai_generated] = params;
-    const l = { id: generateMockId(), user_id, child_id, content, ai_generated: ai_generated === true, created_at: new Date().toISOString() };
+    const [
+      user_id,
+      child_id,
+      content,
+      ai_generated,
+      sender_role = 'donor',
+      msg_type = 'text',
+      file_url = '',
+      is_gallery_item = false,
+    ] = params;
+    const l = {
+      id: generateMockId(),
+      user_id,
+      child_id,
+      content,
+      ai_generated: ai_generated === true,
+      sender_role: sender_role || 'donor',
+      msg_type: msg_type || 'text',
+      file_url: file_url || '',
+      is_gallery_item: Boolean(is_gallery_item),
+      created_at: new Date().toISOString(),
+    };
     mockDb.letters.push(l);
     return { rows: [l], rowCount: 1 };
   }
@@ -624,6 +751,136 @@ const executeMockQuery = (text, params = []) => {
   }
 
 
+  if (sql.includes('FROM PROGRESS_REPORTS')) {
+    let rows = mockDb.progress_reports.map(r => {
+      const child = mockDb.children.find(c => c.id === r.child_id);
+      return {
+        ...r,
+        child_alias: r.child_alias || child?.alias || 'Anak Asuh',
+        orphanage_name: r.orphanage_name || child?.orphanage_name || 'Panti Asuhan AsuhKita',
+      };
+    });
+    if (sql.includes('ONLY_GALLERY') || sql.includes("COALESCE(PR.EVIDENCE_URL, '') <> ''")) {
+      rows = rows.filter(
+        r => (r.evidence_url && String(r.evidence_url).trim().length > 0) || r.category === 'Karya Anak',
+      );
+    }
+    params.forEach(p => {
+      if (typeof p === 'string' && p.length > 0) {
+        if (['Prestasi', 'Karya Anak', 'Kesehatan', 'Kegiatan'].includes(p)) {
+          rows = rows.filter(r => r.category === p);
+        } else if (mockDb.children.some(c => c.id === p)) {
+          rows = rows.filter(r => r.child_id === p);
+        }
+      }
+    });
+    rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return { rows, rowCount: rows.length };
+  }
+
+
+  if (sql.includes('INSERT INTO PROGRESS_REPORTS')) {
+    const [child_id, title, category, period, summary, evidence_url, author_name] = params;
+    const child = mockDb.children.find(c => c.id === child_id || c.alias.toLowerCase() === String(child_id).toLowerCase());
+    const r = {
+      id: generateMockId(),
+      child_id: child?.id || child_id,
+      child_alias: child?.alias || 'Anak Asuh',
+      orphanage_name: child?.orphanage_name || 'Panti Asuhan AsuhKita',
+      title: title || '',
+      category: category || 'Kegiatan',
+      period: period || new Date().toISOString().slice(0, 7),
+      summary: summary || '',
+      evidence_url: evidence_url || '',
+      author_name: author_name || 'Pengurus Panti',
+      ledger_ref: null,
+      created_at: new Date().toISOString(),
+    };
+    mockDb.progress_reports.unshift(r);
+    return { rows: [r], rowCount: 1 };
+  }
+
+
+  if (sql.includes('DELETE FROM PROGRESS_REPORTS')) {
+    const reportId = params[0];
+    const idx = mockDb.progress_reports.findIndex(r => r.id === reportId);
+    if (idx < 0) return { rows: [], rowCount: 0 };
+    const [deleted] = mockDb.progress_reports.splice(idx, 1);
+    return { rows: [{ id: deleted.id }], rowCount: 1 };
+  }
+
+
+  if (sql.includes('FROM CHILD_WISHLISTS')) {
+    if (sql.includes('WHERE W.ID =') || sql.includes('WHERE ID =')) {
+      const id = params[0];
+      const rows = mockDb.child_wishlists.filter(w => w.id === id);
+      return { rows, rowCount: rows.length };
+    }
+    let rows = mockDb.child_wishlists.map(w => {
+      const child = mockDb.children.find(c => c.id === w.child_id);
+      return {
+        ...w,
+        child_alias: w.child_alias || child?.alias || 'Anak Asuh',
+      };
+    });
+    if (params[0]) {
+      const key = String(params[0]).toLowerCase();
+      rows = rows.filter(
+        w => w.child_id === params[0] || (w.child_alias || '').toLowerCase() === key,
+      );
+    }
+    rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return { rows, rowCount: rows.length };
+  }
+
+
+  if (sql.includes('INSERT INTO CHILD_WISHLISTS')) {
+    const [child_id, item_name, estimated_idr] = params;
+    const child = mockDb.children.find(c => c.id === child_id || c.alias.toLowerCase() === String(child_id).toLowerCase());
+    const w = {
+      id: generateMockId(),
+      child_id: child?.id || child_id,
+      child_alias: child?.alias || 'Anak Asuh',
+      item_name,
+      estimated_idr: Number(estimated_idr) || 0,
+      status: 'open',
+      funded_by_user_id: null,
+      funded_by_name: null,
+      receipt_url: '',
+      created_at: new Date().toISOString(),
+    };
+    mockDb.child_wishlists.unshift(w);
+    return { rows: [w], rowCount: 1 };
+  }
+
+
+  if (sql.includes('UPDATE CHILD_WISHLISTS')) {
+    if (sql.includes("STATUS = 'FUNDED'")) {
+      const [funded_by_user_id, funded_by_name, id] = params;
+      const idx = mockDb.child_wishlists.findIndex(w => w.id === id && w.status === 'open');
+      if (idx < 0) return { rows: [], rowCount: 0 };
+      mockDb.child_wishlists[idx] = {
+        ...mockDb.child_wishlists[idx],
+        status: 'funded',
+        funded_by_user_id,
+        funded_by_name,
+      };
+      return { rows: [mockDb.child_wishlists[idx]], rowCount: 1 };
+    }
+    if (sql.includes("STATUS = 'FULFILLED'")) {
+      const [receipt_url, id] = params;
+      const idx = mockDb.child_wishlists.findIndex(w => w.id === id);
+      if (idx < 0) return { rows: [], rowCount: 0 };
+      mockDb.child_wishlists[idx] = {
+        ...mockDb.child_wishlists[idx],
+        status: 'fulfilled',
+        receipt_url: receipt_url || '',
+      };
+      return { rows: [mockDb.child_wishlists[idx]], rowCount: 1 };
+    }
+  }
+
+
   if (sql.includes('FROM CHILDREN') && sql.includes('WHERE ID =')) {
     const childId = params[0];
     const rows = mockDb.children.filter(c => c.id === childId);
@@ -633,12 +890,6 @@ const executeMockQuery = (text, params = []) => {
 
   if (sql.includes('SELECT NOW()')) {
     return { rows: [{ now: new Date().toISOString() }], rowCount: 1 };
-  }
-
-
-  if (sql.includes('INSERT INTO PROGRESS_REPORTS')) {
-    const r = { id: generateMockId(), child_id: params[0], period: params[1], summary: params[2], evidence_url: params[3], ledger_ref: null, created_at: new Date().toISOString() };
-    return { rows: [r], rowCount: 1 };
   }
 
 
