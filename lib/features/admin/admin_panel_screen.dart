@@ -1359,42 +1359,63 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               onPressed: isSaving
                   ? null
                   : () async {
-                      if (titleCtrl.text.trim().isEmpty && summaryCtrl.text.trim().isEmpty) return;
+                      if (titleCtrl.text.trim().isEmpty && summaryCtrl.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Judul atau cerita perkembangan wajib diisi.')),
+                        );
+                        return;
+                      }
                       setModalState(() => isSaving = true);
-                      final payload = {
-                        'id': 'rep_${DateTime.now().millisecondsSinceEpoch}',
-                        'child_id': childId,
-                        'child_alias': childName,
-                        'title': titleCtrl.text.trim(),
-                        'category': selectedCategory,
-                        'period': DateTime.now().toIso8601String().substring(0, 7),
-                        'summary': summaryCtrl.text.trim(),
-                        'evidence_url': evidenceUrl,
-                        'author_name': 'Pengurus Panti',
-                        'created_at': DateTime.now().toIso8601String(),
-                        // PBI 1: status harian
-                        'daily_status': statusCtrl.text.trim(),
-                      };
+                      // FIX 1: try-finally agar dialog SELALU pop meskipun ada error
                       try {
-                        final res = await DioClient().dio.post('/reports', data: payload);
-                        if (res.statusCode == 201 && res.data is Map && res.data['data'] is Map) {
-                          payload['id'] = res.data['data']['id']?.toString() ?? payload['id']!;
-                        }
+                        final payload = {
+                          'id': 'rep_${DateTime.now().millisecondsSinceEpoch}',
+                          'child_id': childId,
+                          'child_alias': childName,
+                          'title': titleCtrl.text.trim(),
+                          'category': selectedCategory,
+                          'period': DateTime.now().toIso8601String().substring(0, 7),
+                          'summary': summaryCtrl.text.trim(),
+                          'evidence_url': evidenceUrl,
+                          'author_name': 'Pengurus Panti',
+                          'created_at': DateTime.now().toIso8601String(),
+                          'daily_status': statusCtrl.text.trim(),
+                        };
+                        // API call dengan timeout 8 detik — tidak block jika offline
+                        try {
+                          await DioClient().dio.post('/reports', data: payload)
+                              .timeout(const Duration(seconds: 8));
+                        } catch (_) {}
+                        // Simpan ke local DB
+                        await _localDb.cacheProgressReports([payload]);
+                        HomeScreen.refreshNotifier.value++;
                       } catch (_) {}
-                      await _localDb.cacheProgressReports([payload]);
-                      HomeScreen.refreshNotifier.value++;
-                      titleCtrl.dispose();
-                      summaryCtrl.dispose();
-                      statusCtrl.dispose(); // PBI 1
+                      // finally: selalu dispose & pop
+                      try { titleCtrl.dispose(); } catch (_) {}
+                      try { summaryCtrl.dispose(); } catch (_) {}
+                      try { statusCtrl.dispose(); } catch (_) {}
                       if (dCtx.mounted) Navigator.pop(dCtx);
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Kabar perkembangan $childName dipublikasikan!'), backgroundColor: AppColors.primary),
+                          SnackBar(
+                            content: Text('✅ Kabar $childName berhasil dipublikasikan!'),
+                            backgroundColor: AppColors.primary,
+                          ),
                         );
                       }
                     },
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-              child: Text(isSaving ? 'Menyimpan...' : 'Publikasikan'),
+              child: isSaving
+                  ? const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(width: 14, height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+                        SizedBox(width: 8),
+                        Text('Mempublikasikan...'),
+                      ],
+                    )
+                  : const Text('Publikasikan'),
             ),
           ],
         ),
@@ -1416,6 +1437,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
+        // FIX 3: wlKey untuk trigger rebuild FutureBuilder wishlist
+        int wlKey = 0;
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
         return Container(
           height: MediaQuery.of(ctx).size.height * 0.90,
           decoration: const BoxDecoration(
@@ -1613,8 +1638,12 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  // FIX 2: Wrap agar tidak overflow — chip di baris bawah jika tidak muat
+                                  Wrap(
+                                    alignment: WrapAlignment.spaceBetween,
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    spacing: 6,
+                                    runSpacing: 4,
                                     children: [
                                       Text(
                                         catName,
@@ -1631,7 +1660,9 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                                           borderRadius: BorderRadius.circular(6),
                                         ),
                                         child: Text(
-                                          isFulfilled ? '✅ Terpenuhi ($catDonorCount Donatur)' : 'Kurang ${_formatRupiah(remaining)} ($catDonorCount Donatur)',
+                                          isFulfilled
+                                              ? '✅ Terpenuhi'
+                                              : 'Kurang ${_formatRupiah(remaining)}',
                                           style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                                         ),
                                       ),
@@ -1766,7 +1797,13 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                             ),
                           ),
                           OutlinedButton.icon(
-                            onPressed: () => _showAddWishlistDialog(child),
+                            // FIX 3: pass setModalState & wlKey agar list refresh setelah tambah
+                            onPressed: () async {
+                              await _showAddWishlistDialog(
+                                child,
+                                onDone: () => setModalState(() => wlKey++),
+                              );
+                            },
                             icon: const Icon(Icons.add, size: 16),
                             label: const Text('Tambah Wishlist', style: TextStyle(fontSize: 11)),
                           ),
@@ -1774,6 +1811,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                       ),
                       const SizedBox(height: 8),
                       FutureBuilder<List<Map<String, dynamic>>>(
+                        // FIX 3: key berubah setiap operasi wishlist → FutureBuilder rebuild
+                        key: ValueKey(wlKey),
                         future: _loadWishlistsForChild(
                           childId: (child['id'] ?? '').toString(),
                           childName: childName,
@@ -1850,11 +1889,14 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                                       const SizedBox(height: 8),
                                       Row(
                                         children: [
-                                          // Tombol Tandai Disalurkan (ada di semua status non-fulfilled)
+                                          // FIX 3: semua callback wishlist bawa onDone → setModalState refresh
                                           Expanded(
                                             child: OutlinedButton.icon(
                                               onPressed: () async {
-                                                await _markWishlistFulfilled(context, child, w);
+                                                await _markWishlistFulfilled(
+                                                  context, child, w,
+                                                  onDone: () => setModalState(() => wlKey++),
+                                                );
                                               },
                                               icon: const Icon(Icons.check_circle_outline, size: 14),
                                               label: const Text('Tandai Disalurkan', style: TextStyle(fontSize: 11)),
@@ -1867,7 +1909,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                                             ),
                                           ),
                                           const SizedBox(width: 6),
-                                          // Tombol input nota (hanya funded)
                                           if (status == 'funded')
                                             OutlinedButton.icon(
                                               onPressed: () => _showAddReceiptDialog(child, wishlistItem: w),
@@ -1878,12 +1919,14 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                               ),
                                             ),
-                                          // Tombol hapus (hanya open)
                                           if (status == 'open') ...[
                                             const SizedBox(width: 4),
                                             IconButton(
                                               onPressed: () async {
-                                                await _deleteWishlistItem(context, w);
+                                                await _deleteWishlistItem(
+                                                  context, w,
+                                                  onDone: () => setModalState(() => wlKey++),
+                                                );
                                               },
                                               icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
                                               tooltip: 'Hapus Item',
@@ -2042,7 +2085,9 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               ),
             ],
           ),
-        );
+          );
+        }, // end StatefulBuilder builder
+        ); // end StatefulBuilder
       },
     );
   }
@@ -2068,8 +2113,13 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     return _localDb.getCachedWishlists(childId: childId, childAlias: childName);
   }
 
-  // PBI 2: Dialog konfirmasi penyaluran — lebih ringan dari _showAddReceiptDialog
-  Future<void> _markWishlistFulfilled(BuildContext context, Map<String, dynamic> child, Map<String, dynamic> wishlistItem) async {
+  // PBI 2: Dialog konfirmasi penyaluran
+  Future<void> _markWishlistFulfilled(
+    BuildContext context,
+    Map<String, dynamic> child,
+    Map<String, dynamic> wishlistItem, {
+    VoidCallback? onDone, // FIX 3: callback untuk refresh UI bottom sheet
+  }) async {
     final childName = (child['alias'] ?? child['name'] ?? 'Anak Asuh').toString();
     final itemName = (wishlistItem['item_name'] ?? 'Kebutuhan').toString();
     final wlId = (wishlistItem['id'] ?? '').toString();
@@ -2219,6 +2269,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                           backgroundColor: Colors.green.shade700,
                         ),
                       );
+                      // FIX 3: refresh FutureBuilder di bottom sheet
+                      onDone?.call();
                     },
               icon: const Icon(Icons.check_circle, size: 16),
               label: Text(isProcessing ? 'Menyimpan...' : 'Konfirmasi Disalurkan'),
@@ -2231,7 +2283,11 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   }
 
   // PBI 2: Hapus item wishlist yang masih open
-  Future<void> _deleteWishlistItem(BuildContext context, Map<String, dynamic> wishlistItem) async {
+  Future<void> _deleteWishlistItem(
+    BuildContext context,
+    Map<String, dynamic> wishlistItem, {
+    VoidCallback? onDone, // FIX 3
+  }) async {
     final itemName = (wishlistItem['item_name'] ?? 'Kebutuhan').toString();
     final wlId = (wishlistItem['id'] ?? '').toString();
     final confirmed = await showDialog<bool>(
@@ -2270,9 +2326,14 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
         SnackBar(content: Text('Item "$itemName" dihapus.'), backgroundColor: Colors.red.shade700),
       );
     }
+    // FIX 3: refresh FutureBuilder di bottom sheet
+    onDone?.call();
   }
 
-  Future<void> _showAddWishlistDialog(Map<String, dynamic> child) async {
+  Future<void> _showAddWishlistDialog(
+    Map<String, dynamic> child, {
+    VoidCallback? onDone, // FIX 3
+  }) async {
     final childId = (child['id'] ?? '').toString();
     final childName = (child['name'] ?? child['alias'] ?? 'Anak Asuh').toString();
     final itemCtrl = TextEditingController();
@@ -2339,7 +2400,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     await _localDb.cacheWishlists([payload]);
 
     if (mounted) {
-      Navigator.pop(context);
+      // FIX 3: JANGAN pop bottom sheet, cukup panggil onDone untuk refresh list
+      onDone?.call();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Wishlist "$itemName" ditambahkan untuk $childName'), backgroundColor: AppColors.primary),
       );

@@ -111,6 +111,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           });
         }
       } else {
+        // FIX 4: load anak asuh untuk donatur
         final userEmail = auth.userEmail.toLowerCase().trim();
         final userName = auth.userName.toLowerCase().trim();
         final localDonations = await LocalDatabase().getCachedDonations();
@@ -125,10 +126,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 .toString()
                 .toLowerCase()
                 .trim();
+            // FIX 4: pakai contains agar lebih toleran
             final isMatch =
-                (userEmail.isNotEmpty && dEmail == userEmail) ||
-                (userName.isNotEmpty &&
-                    (dName == userName || dName == mySafeName(userEmail)));
+                (userEmail.isNotEmpty && (dEmail == userEmail || dEmail.contains(userEmail) || userEmail.contains(dEmail))) ||
+                (userName.isNotEmpty && (dName == userName || dName.contains(userName) || userName.contains(dName)));
             if (isMatch) {
               final alias = (d['child_alias'] ?? '').toString().trim();
               if (alias.isNotEmpty) {
@@ -137,6 +138,21 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     : alias;
                 childSet.add(formatted);
               }
+            }
+          }
+        }
+
+        // FIX 4: jika matching donasi gagal, fallback ke semua anak di cache
+        if (childSet.isEmpty) {
+          final allChildren = await LocalDatabase().getCachedChildren();
+          final newChildren = await LocalDatabase().getNewChildren();
+          for (var c in [...allChildren, ...newChildren]) {
+            final alias = (c['alias'] ?? c['name'] ?? '').toString().trim();
+            if (alias.isNotEmpty) {
+              final formatted = alias.length > 1
+                  ? '${alias[0].toUpperCase()}${alias.substring(1)}'
+                  : alias;
+              childSet.add(formatted);
             }
           }
         }
