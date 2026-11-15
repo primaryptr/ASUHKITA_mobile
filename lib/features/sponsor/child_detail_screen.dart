@@ -195,8 +195,12 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
           _isSponsoredByMe = matched.isNotEmpty;
           _myTotalDonation = total;
           _myDonations = matched;
-          _childReports = loadedReports.take(3).toList();
-          _childWishlists = loadedWishlists;
+          // PBI 1: load semua reports (bukan cuma 3) agar status harian selalu tampil
+          _childReports = loadedReports;
+          // PBI 2: filter wishlist deleted
+          _childWishlists = loadedWishlists
+              .where((w) => (w['status'] ?? 'open').toString() != 'deleted')
+              .toList();
           _childReceipts = loadedReceipts;
         });
       }
@@ -205,6 +209,103 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
 
   String _formatRupiah(num value) {
     return 'Rp ${value.toInt().toString().replaceAllMapped(RegExp(r"(\d{1,3})(?=(\d{3})+(?!\d))"), (m) => "${m[1]}.")}';
+  }
+
+  // PBI 1: Banner status harian terbaru dari admin
+  Widget _buildDailyStatusBanner(String alias) {
+    // Cari report terbaru yang punya daily_status tidak kosong
+    final reportWithStatus = _childReports.firstWhere(
+      (r) => (r['daily_status'] ?? '').toString().trim().isNotEmpty,
+      orElse: () => {},
+    );
+    if (reportWithStatus.isEmpty) return const SizedBox.shrink();
+
+    final statusText = reportWithStatus['daily_status'].toString().trim();
+    final category = (reportWithStatus['category'] ?? 'Kegiatan').toString();
+    final rawDate = (reportWithStatus['created_at'] ?? '').toString();
+    String dateLabel = '';
+    try {
+      final dt = DateTime.parse(rawDate);
+      final now = DateTime.now();
+      final diff = now.difference(dt);
+      if (diff.inDays == 0) {
+        dateLabel = 'Hari ini';
+      } else if (diff.inDays == 1) {
+        dateLabel = 'Kemarin';
+      } else if (diff.inDays < 7) {
+        dateLabel = '${diff.inDays} hari lalu';
+      } else {
+        dateLabel = '${dt.day}/${dt.month}/${dt.year}';
+      }
+    } catch (_) {}
+
+    final categoryColors = <String, Color>{
+      'Prestasi': const Color(0xFF1565C0),
+      'Karya Anak': const Color(0xFF6A1B9A),
+      'Kesehatan': const Color(0xFF2E7D32),
+      'Kegiatan': const Color(0xFFE65100),
+    };
+    final chipColor = categoryColors[category] ?? AppColors.primary;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [chipColor.withValues(alpha: 0.08), chipColor.withValues(alpha: 0.03)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: chipColor.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: chipColor.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.campaign_outlined, color: chipColor, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: chipColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        category,
+                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: chipColor),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      dateLabel,
+                      style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  statusText,
+                  style: const TextStyle(fontSize: 13, color: AppColors.textPrimary, fontWeight: FontWeight.w500, height: 1.3),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildWishlistCard(Map<String, dynamic> child) {
@@ -745,6 +846,8 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
               ),
             ),
 
+            // PBI 1: Banner status harian dari admin (muncul jika ada kabar terbaru)
+            _buildDailyStatusBanner(alias),
 
             if (_isSponsoredByMe)
               Container(
@@ -947,7 +1050,7 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                             )
                           else
                             Column(
-                              children: _childReports.map((rep) {
+                              children: _childReports.take(3).map((rep) {
                                 final title = (rep['title'] ?? '').toString().isNotEmpty
                                     ? rep['title'].toString()
                                     : 'Kabar Terbaru';

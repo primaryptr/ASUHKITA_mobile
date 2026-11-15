@@ -1256,6 +1256,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     final childName = (child['alias'] ?? child['name'] ?? 'Anak Asuh').toString();
     final titleCtrl = TextEditingController();
     final summaryCtrl = TextEditingController();
+    final statusCtrl = TextEditingController(); // PBI 1: status harian 1 baris
     String selectedCategory = 'Prestasi';
     String evidenceUrl = '';
     bool isPolishing = false;
@@ -1279,6 +1280,19 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                       .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                       .toList(),
                   onChanged: (val) => setModalState(() => selectedCategory = val ?? 'Prestasi'),
+                ),
+                const SizedBox(height: 10),
+                // PBI 1: Field Status Harian 1 Baris
+                TextField(
+                  controller: statusCtrl,
+                  maxLength: 80,
+                  decoration: InputDecoration(
+                    labelText: '📢 Status Harian (1 baris singkat)',
+                    hintText: 'Contoh: Hari ini Ani belajar mengaji dengan semangat 🌟',
+                    border: const OutlineInputBorder(),
+                    helperText: 'Muncul sebagai status terbaru di halaman donatur',
+                    helperStyle: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                  ),
                 ),
                 const SizedBox(height: 10),
                 TextField(
@@ -1358,6 +1372,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                         'evidence_url': evidenceUrl,
                         'author_name': 'Pengurus Panti',
                         'created_at': DateTime.now().toIso8601String(),
+                        // PBI 1: status harian
+                        'daily_status': statusCtrl.text.trim(),
                       };
                       try {
                         final res = await DioClient().dio.post('/reports', data: payload);
@@ -1367,6 +1383,9 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                       } catch (_) {}
                       await _localDb.cacheProgressReports([payload]);
                       HomeScreen.refreshNotifier.value++;
+                      titleCtrl.dispose();
+                      summaryCtrl.dispose();
+                      statusCtrl.dispose(); // PBI 1
                       if (dCtx.mounted) Navigator.pop(dCtx);
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -1760,7 +1779,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                           childName: childName,
                         ),
                         builder: (context, wlSnap) {
-                          final wishlists = wlSnap.data ?? [];
+                          // PBI 2: Filter out deleted items
+                          final wishlists = (wlSnap.data ?? [])
+                              .where((w) => (w['status'] ?? 'open').toString() != 'deleted')
+                              .toList();
                           if (wishlists.isEmpty) {
                             return const Padding(
                               padding: EdgeInsets.symmetric(vertical: 6),
@@ -1773,17 +1795,107 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                               final est = (w['estimated_idr'] is num)
                                   ? (w['estimated_idr'] as num).toDouble()
                                   : double.tryParse(w['estimated_idr']?.toString() ?? '0') ?? 0.0;
-                              return ListTile(
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
-                                title: Text((w['item_name'] ?? '').toString(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                                subtitle: Text('${_formatRupiah(est)} • Status: $status', style: const TextStyle(fontSize: 11)),
-                                trailing: status == 'funded'
-                                    ? TextButton(
-                                        onPressed: () => _showAddReceiptDialog(child, wishlistItem: w),
-                                        child: const Text('Tandai Disalurkan', style: TextStyle(fontSize: 11)),
-                                      )
-                                    : null,
+                              final itemName = (w['item_name'] ?? 'Kebutuhan').toString();
+
+                              // Warna status
+                              Color statusColor;
+                              String statusLabel;
+                              IconData statusIcon;
+                              if (status == 'fulfilled') {
+                                statusColor = Colors.green;
+                                statusLabel = 'Sudah Disalurkan';
+                                statusIcon = Icons.check_circle_outline;
+                              } else if (status == 'funded') {
+                                statusColor = Colors.blue;
+                                statusLabel = 'Dana Terpenuhi';
+                                statusIcon = Icons.paid_outlined;
+                              } else {
+                                statusColor = Colors.orange;
+                                statusLabel = 'Butuh Dukungan';
+                                statusIcon = Icons.radio_button_unchecked;
+                              }
+
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: statusColor.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: statusColor.withValues(alpha: 0.25)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(statusIcon, size: 14, color: statusColor),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(itemName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                        ),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: statusColor.withValues(alpha: 0.15),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: Text(statusLabel, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: statusColor)),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(_formatRupiah(est), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.primaryDark)),
+                                    // Tombol aksi berdasarkan status
+                                    if (status != 'fulfilled') ...[
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          // Tombol Tandai Disalurkan (ada di semua status non-fulfilled)
+                                          Expanded(
+                                            child: OutlinedButton.icon(
+                                              onPressed: () async {
+                                                await _markWishlistFulfilled(context, child, w);
+                                              },
+                                              icon: const Icon(Icons.check_circle_outline, size: 14),
+                                              label: const Text('Tandai Disalurkan', style: TextStyle(fontSize: 11)),
+                                              style: OutlinedButton.styleFrom(
+                                                foregroundColor: Colors.green.shade700,
+                                                side: BorderSide(color: Colors.green.shade300),
+                                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          // Tombol input nota (hanya funded)
+                                          if (status == 'funded')
+                                            OutlinedButton.icon(
+                                              onPressed: () => _showAddReceiptDialog(child, wishlistItem: w),
+                                              icon: const Icon(Icons.receipt_outlined, size: 14),
+                                              label: const Text('Input Nota', style: TextStyle(fontSize: 11)),
+                                              style: OutlinedButton.styleFrom(
+                                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                              ),
+                                            ),
+                                          // Tombol hapus (hanya open)
+                                          if (status == 'open') ...[
+                                            const SizedBox(width: 4),
+                                            IconButton(
+                                              onPressed: () async {
+                                                await _deleteWishlistItem(context, w);
+                                              },
+                                              icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                              tooltip: 'Hapus Item',
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
                               );
                             }).toList(),
                           );
@@ -1954,6 +2066,210 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       }
     } catch (_) {}
     return _localDb.getCachedWishlists(childId: childId, childAlias: childName);
+  }
+
+  // PBI 2: Dialog konfirmasi penyaluran — lebih ringan dari _showAddReceiptDialog
+  Future<void> _markWishlistFulfilled(BuildContext context, Map<String, dynamic> child, Map<String, dynamic> wishlistItem) async {
+    final childName = (child['alias'] ?? child['name'] ?? 'Anak Asuh').toString();
+    final itemName = (wishlistItem['item_name'] ?? 'Kebutuhan').toString();
+    final wlId = (wishlistItem['id'] ?? '').toString();
+    final noteCtrl = TextEditingController();
+    String? receiptBase64;
+    bool isProcessing = false;
+    final messenger = ScaffoldMessenger.of(context);
+
+    await showDialog<void>(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (dCtx, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              const Icon(Icons.check_circle_outline, color: Colors.green, size: 24),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Tandai Disalurkan',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.green.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.inventory_2_outlined, size: 16, color: Colors.green),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '"$itemName" untuk $childName',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: noteCtrl,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Catatan (Opsional)',
+                    hintText: 'Misal: Dibeli di toko Maju Jaya tgl 15 Nov',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // Upload struk opsional
+                GestureDetector(
+                  onTap: () async {
+                    final XFile? photo = await _picker.pickImage(source: ImageSource.gallery, maxWidth: 600, imageQuality: 70);
+                    if (photo != null) {
+                      final bytes = await photo.readAsBytes();
+                      setDlgState(() {
+                        receiptBase64 = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                      });
+                    }
+                  },
+                  child: Container(
+                    height: 72,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.4), style: BorderStyle.solid),
+                    ),
+                    child: receiptBase64 != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.memory(base64Decode(receiptBase64!.split(',').last), fit: BoxFit.cover),
+                          )
+                        : const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.add_photo_alternate_outlined, color: AppColors.primary, size: 20),
+                              SizedBox(width: 6),
+                              Text('Upload Struk (Opsional)', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                            ],
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
+            ElevatedButton.icon(
+              onPressed: isProcessing
+                  ? null
+                  : () async {
+                      setDlgState(() => isProcessing = true);
+                      // Update wishlist status ke fulfilled
+                      if (wlId.isNotEmpty) {
+                        try {
+                          await DioClient().dio.patch('/wishlists/$wlId/fulfill', data: {
+                            'receipt_url': receiptBase64 ?? '',
+                            'notes': noteCtrl.text.trim(),
+                          });
+                        } catch (_) {}
+                        await _localDb.cacheWishlists([
+                          {
+                            ...wishlistItem,
+                            'status': 'fulfilled',
+                            'receipt_url': receiptBase64 ?? '',
+                          }
+                        ]);
+                      }
+                      // Simpan nota jika ada struk
+                      if (receiptBase64 != null) {
+                        final receipt = {
+                          'id': 'rec_${DateTime.now().millisecondsSinceEpoch}',
+                          'childName': childName,
+                          'title': 'Penyaluran: $itemName',
+                          'amount': (wishlistItem['estimated_idr'] is num)
+                              ? (wishlistItem['estimated_idr'] as num).toDouble()
+                              : 0.0,
+                          'date': DateTime.now().toString().split(' ')[0],
+                          'receiptImage': receiptBase64,
+                          'description': noteCtrl.text.trim(),
+                          'hash': '0x${DateTime.now().millisecondsSinceEpoch.toRadixString(16)}',
+                        };
+                        await _localDb.insertReceipt(receipt);
+                        try {
+                          await DioClient().dio.post('/ledger/receipts', data: receipt);
+                        } catch (_) {}
+                      }
+                      HomeScreen.refreshNotifier.value++;
+                      noteCtrl.dispose();
+                      if (dCtx.mounted) Navigator.pop(dCtx);
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text('✅ "$itemName" berhasil ditandai sebagai Sudah Disalurkan!'),
+                          backgroundColor: Colors.green.shade700,
+                        ),
+                      );
+                    },
+              icon: const Icon(Icons.check_circle, size: 16),
+              label: Text(isProcessing ? 'Menyimpan...' : 'Konfirmasi Disalurkan'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700, foregroundColor: Colors.white),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // PBI 2: Hapus item wishlist yang masih open
+  Future<void> _deleteWishlistItem(BuildContext context, Map<String, dynamic> wishlistItem) async {
+    final itemName = (wishlistItem['item_name'] ?? 'Kebutuhan').toString();
+    final wlId = (wishlistItem['id'] ?? '').toString();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('Hapus Item Wishlist?', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        content: Text('Item "$itemName" akan dihapus dari daftar kebutuhan anak.', style: const TextStyle(fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    // Hapus via API jika ada ID
+    if (wlId.isNotEmpty) {
+      try {
+        await DioClient().dio.delete('/wishlists/$wlId');
+      } catch (_) {}
+    }
+    // Tandai sebagai deleted di local dengan status 'deleted' (filter di UI)
+    await _localDb.cacheWishlists([
+      {
+        ...wishlistItem,
+        'status': 'deleted',
+      }
+    ]);
+    HomeScreen.refreshNotifier.value++;
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Item "$itemName" dihapus.'), backgroundColor: Colors.red.shade700),
+      );
+    }
   }
 
   Future<void> _showAddWishlistDialog(Map<String, dynamic> child) async {
@@ -2540,6 +2856,12 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
 }
 
 Future<void> showAdminBroadcastDialog(BuildContext context) async {
+  // ✅ PENTING: Capture ScaffoldMessengerState SEBELUM dialog dibuka.
+  // Ini mencegah error '_dependents.isEmpty' yang terjadi ketika
+  // ScaffoldMessenger.of(context) dipanggil setelah Navigator.pop()
+  // atau setelah await — context sudah tidak valid saat itu.
+  final messenger = ScaffoldMessenger.of(context);
+
   final titleCtrl = TextEditingController();
   final bodyCtrl = TextEditingController();
   bool isSending = false;
@@ -2585,12 +2907,16 @@ Future<void> showAdminBroadcastDialog(BuildContext context) async {
                     final title = titleCtrl.text.trim();
                     final body = bodyCtrl.text.trim();
                     if (title.isEmpty || body.isEmpty) {
-                      ScaffoldMessenger.of(dCtx).showSnackBar(
+                      // Gunakan messenger yang sudah di-capture, bukan ScaffoldMessenger.of(...)
+                      messenger.showSnackBar(
                         const SnackBar(content: Text('Judul dan isi pesan wajib diisi.')),
                       );
                       return;
                     }
-                    setDialogState(() => isSending = true);
+                    // Pastikan dialog masih terbuka sebelum update state
+                    if (dCtx.mounted) {
+                      setDialogState(() => isSending = true);
+                    }
                     String feedback = 'Broadcast tercatat untuk dikirim saat terhubung.';
                     try {
                       final res = await DioClient().dio.post(
@@ -2601,14 +2927,20 @@ Future<void> showAdminBroadcastDialog(BuildContext context) async {
                         feedback = 'Broadcast notifikasi berhasil dikirim ke donatur!';
                       }
                     } catch (_) {}
+                    // Pop dialog
                     if (dCtx.mounted) Navigator.pop(dCtx);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(feedback), backgroundColor: AppColors.primary),
-                      );
-                    }
+                    // Gunakan messenger yang sudah di-capture — aman meski context sudah invalid
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(feedback),
+                        backgroundColor: const Color(0xFF388E3C),
+                      ),
+                    );
                   },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF388E3C),
+              foregroundColor: Colors.white,
+            ),
             child: Text(isSending ? 'Mengirim...' : 'Kirim Broadcast'),
           ),
         ],
@@ -2618,3 +2950,5 @@ Future<void> showAdminBroadcastDialog(BuildContext context) async {
   titleCtrl.dispose();
   bodyCtrl.dispose();
 }
+
+

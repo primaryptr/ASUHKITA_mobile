@@ -80,6 +80,8 @@ class LocalDatabase {
       'ALTER TABLE new_children ADD COLUMN category_budgets TEXT',
       'ALTER TABLE new_children ADD COLUMN daily_status TEXT',
       'ALTER TABLE new_children ADD COLUMN birth_date TEXT',
+      // PBI 1: status harian dari kabar anak
+      'ALTER TABLE cached_progress_reports ADD COLUMN daily_status TEXT',
     ];
     for (final sql in migrations) {
       try {
@@ -585,6 +587,8 @@ class LocalDatabase {
       'evidence_url': r['evidence_url']?.toString() ?? '',
       'author_name': r['author_name']?.toString() ?? 'Pengurus Panti',
       'created_at': r['created_at']?.toString() ?? DateTime.now().toIso8601String(),
+      // PBI 1: status harian 1 baris
+      'daily_status': r['daily_status']?.toString() ?? '',
     };
   }
 
