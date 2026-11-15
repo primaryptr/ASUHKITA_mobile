@@ -693,13 +693,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   Map<String, dynamic> _statusStyle(String status) {
     switch (status) {
       case 'approved':
-        return {'label': 'Disetujui', 'color': Colors.green};
+        return {'label': '✅ Disetujui', 'color': Colors.green};
       case 'rescheduled':
-        return {'label': 'Dijadwalkan Ulang', 'color': Colors.orange};
+        return {'label': '🔄 Dijadwalkan Ulang', 'color': Colors.orange};
       case 'completed':
-        return {'label': 'Selesai', 'color': Colors.blue};
+        return {'label': '🏁 Selesai', 'color': Colors.blue};
+      case 'cancelled':
+        return {'label': '❌ Ditolak', 'color': Colors.red};
       default:
-        return {'label': 'Menunggu', 'color': Colors.amber.shade800};
+        return {'label': '⏳ Menunggu Konfirmasi', 'color': Colors.amber.shade800};
     }
   }
 
@@ -759,7 +761,23 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     }
   }
 
+  // PBI 3: format UTC ke WIB manusiawi
+  String _formatScheduleTime(String? utcStr) {
+    if (utcStr == null || utcStr.isEmpty) return '-';
+    try {
+      final utc = DateTime.parse(utcStr).toUtc();
+      final wib = utc.add(const Duration(hours: 7));
+      return DateFormat('EEEE, dd MMM yyyy • HH:mm', 'id').format(wib) + ' WIB';
+    } catch (_) {
+      return utcStr;
+    }
+  }
+
   Widget _buildAdminQueueTab() {
+    // PBI 3: hitung jadwal menunggu untuk badge
+    final pendingCount = _schedules.where((s) =>
+      (s['status'] ?? 'scheduled').toString() == 'scheduled').length;
+
     if (_schedules.isEmpty) {
       return const Center(
         child: Padding(
@@ -772,81 +790,123 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         ),
       );
     }
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _schedules.length,
-      itemBuilder: (context, idx) {
-        final s = _schedules[idx];
-        final st = _statusStyle((s['status'] ?? 'scheduled').toString());
-        final stColor = st['color'] as Color;
-        final childName = (s['child_alias'] ?? 'Anak Asuh').toString();
-        final donorName = (s['donor_name'] ?? 'Donatur').toString();
-        final notes = (s['notes'] ?? '').toString();
-        final adminNotes = (s['admin_notes'] ?? '').toString();
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return RefreshIndicator(
+      color: AppColors.primary,
+      onRefresh: _loadSchedules,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _schedules.length,
+        itemBuilder: (context, idx) {
+          final s = _schedules[idx];
+          final st = _statusStyle((s['status'] ?? 'scheduled').toString());
+          final stColor = st['color'] as Color;
+          final childName = (s['child_alias'] ?? 'Anak Asuh').toString();
+          final donorName = (s['donor_name'] ?? 'Donatur').toString();
+          final notes = (s['notes'] ?? '').toString();
+          final adminNotes = (s['admin_notes'] ?? '').toString();
+          final status = (s['status'] ?? 'scheduled').toString();
+          final isPending = status == 'scheduled';
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            elevation: isPending ? 2 : 1,
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: isPending ? Border.all(color: Colors.amber.shade300, width: 1.5) : null,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        childName,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-                      ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            childName,
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: stColor.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            st['label'] as String,
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: stColor),
+                          ),
+                        ),
+                      ],
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: stColor.withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(8),
+                    const SizedBox(height: 4),
+                    Text('👤 Donatur: $donorName', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                    // PBI 3: Waktu diformat ke WIB
+                    Text('🕐 ${_formatScheduleTime(s['scheduled_at_utc']?.toString())}',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+                    if (notes.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text('📋 Topik: $notes', style: const TextStyle(fontSize: 12)),
+                    ],
+                    if (adminNotes.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text('📌 Catatan Panti: $adminNotes', style: const TextStyle(fontSize: 12, color: AppColors.primaryDark, fontWeight: FontWeight.w600)),
+                    ],
+                    const SizedBox(height: 10),
+                    // PBI 3: Tombol aksi berdasarkan status
+                    if (isPending) ...[
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: () => _updateScheduleStatus(s, 'approved'),
+                            icon: const Icon(Icons.check_circle_outline, size: 14),
+                            label: const Text('Setujui', style: TextStyle(fontSize: 11)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () => _updateScheduleStatus(s, 'rescheduled'),
+                            icon: const Icon(Icons.schedule, size: 14),
+                            label: const Text('Jadwal Ulang', style: TextStyle(fontSize: 11)),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () => _updateScheduleStatus(s, 'cancelled'),
+                            icon: const Icon(Icons.cancel_outlined, size: 14),
+                            label: const Text('Tolak', style: TextStyle(fontSize: 11, color: Colors.red)),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Colors.red),
+                              foregroundColor: Colors.red,
+                            ),
+                          ),
+                        ],
                       ),
-                      child: Text(
-                        st['label'] as String,
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: stColor),
+                    ] else if (status == 'approved') ...[
+                      Wrap(
+                        spacing: 6,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () => _updateScheduleStatus(s, 'completed'),
+                            icon: const Icon(Icons.flag_outlined, size: 14),
+                            label: const Text('Tandai Selesai', style: TextStyle(fontSize: 11)),
+                          ),
+                        ],
                       ),
-                    ),
+                    ],
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text('Donatur: $donorName', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-                Text('Waktu UTC: ${(s['scheduled_at_utc'] ?? '').toString()}', style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                if (notes.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text('Topik: $notes', style: const TextStyle(fontSize: 12)),
-                ],
-                if (adminNotes.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text('Catatan Panti: $adminNotes', style: const TextStyle(fontSize: 12, color: AppColors.primaryDark, fontWeight: FontWeight.w600)),
-                ],
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 6,
-                  children: [
-                    OutlinedButton(
-                      onPressed: () => _updateScheduleStatus(s, 'approved'),
-                      child: const Text('Setujui', style: TextStyle(fontSize: 11)),
-                    ),
-                    OutlinedButton(
-                      onPressed: () => _updateScheduleStatus(s, 'rescheduled'),
-                      child: const Text('Jadwal Ulang', style: TextStyle(fontSize: 11)),
-                    ),
-                    OutlinedButton(
-                      onPressed: () => _updateScheduleStatus(s, 'completed'),
-                      child: const Text('Selesai', style: TextStyle(fontSize: 11)),
-                    ),
-                  ],
-                ),
-              ],
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
@@ -1297,9 +1357,24 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     ),
                     if (!isAdmin) ...[
                       const SizedBox(height: 20),
-                      const Text(
-                        'Status Pengajuan Video Call',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                      Row(
+                        children: [
+                          const Text(
+                            'Status Pengajuan Video Call',
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                          ),
+                          const Spacer(),
+                          // PBI 3: Tombol refresh manual
+                          TextButton.icon(
+                            onPressed: () async {
+                              setState(() => _isLoading = true);
+                              await _loadSchedules();
+                              setState(() => _isLoading = false);
+                            },
+                            icon: const Icon(Icons.refresh, size: 14),
+                            label: const Text('Refresh', style: TextStyle(fontSize: 11)),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 8),
                       if (_schedules.isEmpty)
@@ -1312,28 +1387,61 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           final st = _statusStyle((s['status'] ?? 'scheduled').toString());
                           final stColor = st['color'] as Color;
                           final adminNotes = (s['admin_notes'] ?? '').toString();
+                          final status = (s['status'] ?? 'scheduled').toString();
+                          final isPending = status == 'scheduled';
+                          final isCancelled = status == 'cancelled';
                           return Card(
                             margin: const EdgeInsets.only(bottom: 10),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            child: ListTile(
-                              title: Text((s['child_alias'] ?? 'Anak Asuh').toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text((s['scheduled_at_utc'] ?? '').toString(), style: const TextStyle(fontSize: 11)),
-                                  if (adminNotes.isNotEmpty)
-                                    Text('Pesan Panti: $adminNotes', style: const TextStyle(fontSize: 12, color: AppColors.primaryDark, fontWeight: FontWeight.w600)),
-                                ],
+                            child: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                // PBI 3: highlight visual berdasarkan status
+                                color: isPending
+                                    ? Colors.amber.shade50
+                                    : isCancelled
+                                        ? Colors.red.shade50
+                                        : null,
                               ),
-                              trailing: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: stColor.withValues(alpha: 0.14),
-                                  borderRadius: BorderRadius.circular(8),
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                title: Text(
+                                  (s['child_alias'] ?? 'Anak Asuh').toString(),
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                                 ),
-                                child: Text(
-                                  st['label'] as String,
-                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: stColor),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // PBI 3: Format waktu WIB manusiawi
+                                    Text(
+                                      _formatScheduleTime(s['scheduled_at_utc']?.toString()),
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                                    ),
+                                    if (adminNotes.isNotEmpty)
+                                      Container(
+                                        margin: const EdgeInsets.only(top: 4),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.primary.withValues(alpha: 0.08),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Text(
+                                          '📌 Pesan Panti: $adminNotes',
+                                          style: const TextStyle(fontSize: 12, color: AppColors.primaryDark, fontWeight: FontWeight.w600),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                trailing: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: stColor.withValues(alpha: 0.14),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    st['label'] as String,
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: stColor),
+                                  ),
                                 ),
                               ),
                             ),
@@ -1347,6 +1455,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             );
 
     if (isAdmin) {
+      // PBI 3: hitung badge jadwal menunggu
+      final pendingCount = _schedules.where((s) =>
+          (s['status'] ?? 'scheduled').toString() == 'scheduled').length;
       return DefaultTabController(
         length: 2,
         child: Scaffold(
@@ -1356,13 +1467,34 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
             elevation: 0,
-            bottom: const TabBar(
+            bottom: TabBar(
               labelColor: Colors.white,
               unselectedLabelColor: Colors.white70,
               indicatorColor: Colors.white,
               tabs: [
-                Tab(text: 'Antrean Jadwal Donatur'),
-                Tab(text: 'Pengingat Audit Kas'),
+                Tab(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Antrean Jadwal Donatur'),
+                      if (pendingCount > 0) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '$pendingCount',
+                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const Tab(text: 'Pengingat Audit Kas'),
               ],
             ),
           ),
