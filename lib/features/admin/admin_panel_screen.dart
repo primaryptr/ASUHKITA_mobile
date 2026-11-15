@@ -2617,10 +2617,13 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
-          IconButton(
-            tooltip: 'Broadcast Kabar ke Donatur',
-            icon: const Icon(Icons.campaign_outlined),
-            onPressed: () => showAdminBroadcastDialog(context),
+          Builder(
+            builder: (btnCtx) => IconButton(
+              tooltip: 'Broadcast Kabar ke Donatur',
+              icon: const Icon(Icons.campaign_outlined),
+              // PBI 4: gunakan btnCtx dari Builder agar context selalu valid
+              onPressed: () => showAdminBroadcastDialog(btnCtx),
+            ),
           ),
           IconButton(
             tooltip: 'Refresh Data',
@@ -2856,99 +2859,161 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
 }
 
 Future<void> showAdminBroadcastDialog(BuildContext context) async {
-  // ✅ PENTING: Capture ScaffoldMessengerState SEBELUM dialog dibuka.
-  // Ini mencegah error '_dependents.isEmpty' yang terjadi ketika
-  // ScaffoldMessenger.of(context) dipanggil setelah Navigator.pop()
-  // atau setelah await — context sudah tidak valid saat itu.
+  // PBI 4: Capture messenger & navigator SEBELUM async gap apapun
   final messenger = ScaffoldMessenger.of(context);
 
   final titleCtrl = TextEditingController();
   final bodyCtrl = TextEditingController();
-  bool isSending = false;
 
   await showDialog<void>(
     context: context,
+    barrierDismissible: false,
     builder: (dCtx) => StatefulBuilder(
-      builder: (dCtx, setDialogState) => AlertDialog(
-        title: const Text('Broadcast Kabar ke Donatur', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleCtrl,
-                maxLength: 120,
-                decoration: const InputDecoration(
-                  labelText: 'Judul Notifikasi',
-                  hintText: 'Contoh: Laporan & Kabar Terbaru Anak Asuh',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: bodyCtrl,
-                maxLines: 4,
-                maxLength: 1000,
-                decoration: const InputDecoration(
-                  labelText: 'Isi Pesan Broadcast',
-                  hintText: 'Tulis pengumuman atau ucapan terima kasih untuk seluruh donatur...',
-                  border: OutlineInputBorder(),
+      builder: (dCtx, setDlgState) {
+        // PBI 4: isSending berada di dalam closure StatefulBuilder agar reactive
+        bool isSending = false;
+
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: const [
+              Icon(Icons.campaign, color: Color(0xFF388E3C), size: 24),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Broadcast Kabar ke Donatur',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
               ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
-          ElevatedButton(
-            onPressed: isSending
-                ? null
-                : () async {
-                    final title = titleCtrl.text.trim();
-                    final body = bodyCtrl.text.trim();
-                    if (title.isEmpty || body.isEmpty) {
-                      // Gunakan messenger yang sudah di-capture, bukan ScaffoldMessenger.of(...)
-                      messenger.showSnackBar(
-                        const SnackBar(content: Text('Judul dan isi pesan wajib diisi.')),
-                      );
-                      return;
-                    }
-                    // Pastikan dialog masih terbuka sebelum update state
-                    if (dCtx.mounted) {
-                      setDialogState(() => isSending = true);
-                    }
-                    String feedback = 'Broadcast tercatat untuk dikirim saat terhubung.';
-                    try {
-                      final res = await DioClient().dio.post(
-                        '/notifications/broadcast',
-                        data: {'title': title, 'body': body},
-                      );
-                      if (res.statusCode == 200) {
-                        feedback = 'Broadcast notifikasi berhasil dikirim ke donatur!';
-                      }
-                    } catch (_) {}
-                    // Pop dialog
-                    if (dCtx.mounted) Navigator.pop(dCtx);
-                    // Gunakan messenger yang sudah di-capture — aman meski context sudah invalid
-                    messenger.showSnackBar(
-                      SnackBar(
-                        content: Text(feedback),
-                        backgroundColor: const Color(0xFF388E3C),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F5E9),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF81C784)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Color(0xFF388E3C)),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Pesan akan dikirim sebagai notifikasi ke semua donatur aktif.',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF2E7D32)),
+                        ),
                       ),
-                    );
-                  },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF388E3C),
-              foregroundColor: Colors.white,
+                    ],
+                  ),
+                ),
+                TextField(
+                  controller: titleCtrl,
+                  maxLength: 120,
+                  decoration: const InputDecoration(
+                    labelText: 'Judul Notifikasi',
+                    hintText: 'Contoh: Laporan & Kabar Terbaru Anak Asuh',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.title),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: bodyCtrl,
+                  maxLines: 4,
+                  maxLength: 1000,
+                  decoration: const InputDecoration(
+                    labelText: 'Isi Pesan Broadcast',
+                    hintText: 'Tulis pengumuman atau ucapan terima kasih untuk seluruh donatur...',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.message_outlined),
+                  ),
+                ),
+              ],
             ),
-            child: Text(isSending ? 'Mengirim...' : 'Kirim Broadcast'),
           ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: isSending ? null : () {
+                titleCtrl.dispose();
+                bodyCtrl.dispose();
+                Navigator.pop(dCtx);
+              },
+              child: const Text('Batal'),
+            ),
+            ElevatedButton.icon(
+              onPressed: isSending
+                  ? null
+                  : () async {
+                      final title = titleCtrl.text.trim();
+                      final body = bodyCtrl.text.trim();
+                      if (title.isEmpty || body.isEmpty) {
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('⚠️ Judul dan isi pesan wajib diisi.'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+                      // PBI 4: update isSending SEBELUM await
+                      setDlgState(() => isSending = true);
+
+                      String feedback = '📡 Broadcast tercatat, akan dikirim saat terhubung.';
+                      bool success = false;
+                      try {
+                        final res = await DioClient().dio.post(
+                          '/notifications/broadcast',
+                          data: {'title': title, 'body': body},
+                        );
+                        if (res.statusCode == 200 || res.statusCode == 201) {
+                          feedback = '✅ Broadcast berhasil dikirim ke seluruh donatur!';
+                          success = true;
+                        }
+                      } catch (_) {
+                        // offline — feedback default tetap
+                      }
+
+                      // PBI 4: dispose controller SEBELUM pop dialog
+                      titleCtrl.dispose();
+                      bodyCtrl.dispose();
+
+                      // PBI 4: pop dialog dengan dCtx (bukan context parent)
+                      if (dCtx.mounted) Navigator.pop(dCtx);
+
+                      // PBI 4: tampilkan snackbar via messenger yang sudah di-capture
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(feedback),
+                          backgroundColor: success
+                              ? const Color(0xFF388E3C)
+                              : Colors.blueGrey.shade700,
+                          duration: const Duration(seconds: 4),
+                        ),
+                      );
+                    },
+              icon: isSending
+                  ? const SizedBox(
+                      width: 14, height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.send, size: 16),
+              label: Text(isSending ? 'Mengirim...' : 'Kirim Broadcast'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF388E3C),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        );
+      },
     ),
   );
-  titleCtrl.dispose();
-  bodyCtrl.dispose();
 }
 
 
