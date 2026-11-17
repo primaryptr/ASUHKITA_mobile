@@ -1,11 +1,6 @@
-
-
-
-
-
-
 import 'package:flutter/foundation.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
+
 import '../core/dio_client.dart';
 import '../data/local_db.dart';
 
@@ -44,9 +39,6 @@ class GeminiService {
     return _model;
   }
 
-
-
-
   Future<String> generateLetter({
     required String childAlias,
     required String topic,
@@ -71,7 +63,11 @@ class GeminiService {
     return _generateDynamicLetter(childAlias, topic, donorName: donorName);
   }
 
-  String _generateDynamicLetter(String alias, String topic, {String donorName = 'Bapak/Ibu Donatur'}) {
+  String _generateDynamicLetter(
+    String alias,
+    String topic, {
+    String donorName = 'Bapak/Ibu Donatur',
+  }) {
     return 'Kepada $donorName yang terkasih,\n\n'
         'Salam hangat dan doa terbaik dari kami di panti asuhan. Semoga Kakak/Bapak/Ibu senantiasa dalam keadaan sehat walafiat, bahagia, dan selalu dilimpahkan keberkahan rezeki.\n\n'
         'Saya menulis surat ini dari lubuk hati yang terdalam untuk mengucapkan terima kasih yang sebesar-besarnya atas $topic. Bantuan, doa, dan kasih sayang yang telah diberikan sangatlah berarti bagi kehidupan serta kelanjutan pendidikan saya di sini.\n\n'
@@ -79,9 +75,6 @@ class GeminiService {
         'Dengan penuh rasa terima kasih dan doa tulus,\n'
         '$alias & Keluarga Besar Panti Asuhan.';
   }
-
-
-
 
   Future<String> summarizeReport(String rawText) async {
     final model = _gemini;
@@ -138,7 +131,12 @@ class GeminiService {
         .split('\n')
         .map((l) => l.trim())
         .where((l) => l.isNotEmpty)
-        .where((l) => !RegExp(r'^(#+\s*|ringkasan\b.*:?\s*$)', caseSensitive: false).hasMatch(l))
+        .where(
+          (l) => !RegExp(
+            r'^(#+\s*|ringkasan\b.*:?\s*$)',
+            caseSensitive: false,
+          ).hasMatch(l),
+        )
         .map((l) => l.replaceFirst(RegExp(r'^[\-\*\•]+\s*'), '').trim())
         .where((l) => l.isNotEmpty)
         .toList();
@@ -159,8 +157,12 @@ class GeminiService {
     final formatted = <String>[];
     for (var s in sentences) {
       if (s.isEmpty) continue;
-      final firstUpper = s[0].toUpperCase() + (s.length > 1 ? s.substring(1) : '');
-      final hasEndPunctuation = firstUpper.endsWith('.') || firstUpper.endsWith('!') || firstUpper.endsWith('?');
+      final firstUpper =
+          s[0].toUpperCase() + (s.length > 1 ? s.substring(1) : '');
+      final hasEndPunctuation =
+          firstUpper.endsWith('.') ||
+          firstUpper.endsWith('!') ||
+          firstUpper.endsWith('?');
       formatted.add(hasEndPunctuation ? firstUpper : '$firstUpper.');
     }
     if (formatted.isEmpty) return normalizedSpaces;
@@ -197,14 +199,10 @@ class GeminiService {
     return buffer.toString().trim();
   }
 
-
-
-
   Future<String> askFaq(
     String question, {
     List<Map<String, String>>? history,
   }) async {
-
     String databaseContext = '';
     try {
       final localDb = LocalDatabase();
@@ -214,13 +212,13 @@ class GeminiService {
       final receipts = await localDb.getReceipts();
       final donations = await localDb.getCachedDonations();
 
-      databaseContext = '\n[KONTEKS DATA NYATA DATABASE SAAT INI]:\n'
+      databaseContext =
+          '\n[KONTEKS DATA NYATA DATABASE SAAT INI]:\n'
           '- Total anak asuh terdaftar di database: $totalKids anak\n'
           '- Kategori kebutuhan: Pendidikan, Kesehatan, Nutrisi & Gizi, Kebutuhan Sehari-hari\n'
           '- Total nota pengeluaran belanja terverifikasi on-chain: ${receipts.length} transaksi\n'
           '- Total riwayat donasi platform: ${donations.length} donasi\n';
     } catch (_) {}
-
 
     final model = _gemini;
     if (model != null) {
@@ -241,7 +239,9 @@ class GeminiService {
 
         final chat = model.startChat(history: historyContents);
         final promptWithContext = '$question\n$databaseContext';
-        final response = await chat.sendMessage(Content.text(promptWithContext));
+        final response = await chat.sendMessage(
+          Content.text(promptWithContext),
+        );
         final text = response.text?.trim() ?? '';
         if (text.isNotEmpty) return text;
       } catch (e) {
@@ -249,9 +249,11 @@ class GeminiService {
       }
     }
 
-
     try {
-      final res = await DioClient().dio.post('/ai/faq', data: {'question': question});
+      final res = await DioClient().dio.post(
+        '/ai/faq',
+        data: {'question': question},
+      );
       if (res.statusCode == 200 && res.data != null) {
         final answer = res.data['answer'] ?? res.data['data']?['answer'];
         if (answer != null && answer.toString().trim().isNotEmpty) {
@@ -260,37 +262,141 @@ class GeminiService {
       }
     } catch (_) {}
 
-
     return await _resolveContextGuardedAnswer(question);
   }
-
-
-
 
   Future<String> _resolveContextGuardedAnswer(String query) async {
     final q = query.toLowerCase().trim();
 
-
     final inContextKeywords = [
-      'asuh', 'anak', 'panti', 'donasi', 'sponsor', 'yatim', 'dhuafa', 'bantu', 'sedekah',
-      'ledger', 'blockchain', 'transparansi', 'sha', 'hash', 'verifikasi', 'kredensial', 'sertifikat',
-      'sensor', 'langkah', 'pedometer', 'accelerometer', 'gyro', 'game', 'bintang',
-      'poin', 'kebaikan', 'badge', 'ranking', 'peringkat', 'reward',
-      'lbs', 'peta', 'lokasi', 'gps', 'rute', 'jarak', 'radius', 'check in', 'kunjungan',
-      'kurs', 'mata uang', 'valuta', 'usd', 'idr', 'sgd', 'eur', 'sar', 'rupiah', 'dollar',
-      'jadwal', 'zona', 'wib', 'wita', 'wit', 'london', 'jam', 'waktu', 'pengingat',
-      'surat', 'rapor', 'karya', 'sekolah', 'video call', 'telepon', 'chat', 'ruang kasih',
-      'nota', 'kuitansi', 'keuangan', 'saldo', 'belanja', 'laporan', 'kas', 'audit', 'anggaran',
-      'sepatu', 'seragam', 'tas', 'buku', 'spp', 'pendidikan', 'makanan', 'gizi', 'nutrisi', 'susu',
-      'kesehatan', 'obat', 'dokter', 'perawatan', 'harian', 'sembako', 'pakaian',
-      'akun', 'login', 'register', 'profil', 'biometrik', 'sidik jari', 'password', 'logout', 'masuk', 'daftar',
-      'saran', 'kesan', 'feedback', 'ulasan', 'komentar',
-      'halo', 'hai', 'pagi', 'siang', 'sore', 'malam', 'assalam', 'siapa kamu', 'bisa apa', 'fitur',
-      'legalitas', 'resmi', 'izin', 'peduli anak', 'lombok', 'kontak', 'alamat', 'relawan',
+      'asuh',
+      'anak',
+      'panti',
+      'donasi',
+      'sponsor',
+      'yatim',
+      'dhuafa',
+      'bantu',
+      'sedekah',
+      'ledger',
+      'blockchain',
+      'transparansi',
+      'sha',
+      'hash',
+      'verifikasi',
+      'kredensial',
+      'sertifikat',
+      'sensor',
+      'langkah',
+      'pedometer',
+      'accelerometer',
+      'gyro',
+      'game',
+      'bintang',
+      'poin',
+      'kebaikan',
+      'badge',
+      'ranking',
+      'peringkat',
+      'reward',
+      'lbs',
+      'peta',
+      'lokasi',
+      'gps',
+      'rute',
+      'jarak',
+      'radius',
+      'check in',
+      'kunjungan',
+      'kurs',
+      'mata uang',
+      'valuta',
+      'usd',
+      'idr',
+      'sgd',
+      'eur',
+      'sar',
+      'rupiah',
+      'dollar',
+      'jadwal',
+      'zona',
+      'wib',
+      'wita',
+      'wit',
+      'london',
+      'jam',
+      'waktu',
+      'pengingat',
+      'surat',
+      'rapor',
+      'karya',
+      'sekolah',
+      'video call',
+      'telepon',
+      'chat',
+      'ruang kasih',
+      'nota',
+      'kuitansi',
+      'keuangan',
+      'saldo',
+      'belanja',
+      'laporan',
+      'kas',
+      'audit',
+      'anggaran',
+      'sepatu',
+      'seragam',
+      'tas',
+      'buku',
+      'spp',
+      'pendidikan',
+      'makanan',
+      'gizi',
+      'nutrisi',
+      'susu',
+      'kesehatan',
+      'obat',
+      'dokter',
+      'perawatan',
+      'harian',
+      'sembako',
+      'pakaian',
+      'akun',
+      'login',
+      'register',
+      'profil',
+      'biometrik',
+      'sidik jari',
+      'password',
+      'logout',
+      'masuk',
+      'daftar',
+      'saran',
+      'kesan',
+      'feedback',
+      'ulasan',
+      'komentar',
+      'halo',
+      'hai',
+      'pagi',
+      'siang',
+      'sore',
+      'malam',
+      'assalam',
+      'siapa kamu',
+      'bisa apa',
+      'fitur',
+      'legalitas',
+      'resmi',
+      'izin',
+      'peduli anak',
+      'lombok',
+      'kontak',
+      'alamat',
+      'relawan',
     ];
 
     final isRelevant = inContextKeywords.any((k) => q.contains(k));
-
 
     if (!isRelevant) {
       return '⚠️ **Peringatan Di Luar Konteks AsuhKita**\n\n'
@@ -305,20 +411,30 @@ class GeminiService {
           '• "Bagaimana cara mengumpulkan Poin Kebaikan lewat langkah kaki atau game?"';
     }
 
-
     int totalChildren = 20;
     try {
       final kids = await LocalDatabase().getNewChildren();
       final cached = await LocalDatabase().getCachedChildren();
-      totalChildren = kids.isNotEmpty ? kids.length : (cached.isNotEmpty ? cached.length : 20);
+      totalChildren = kids.isNotEmpty
+          ? kids.length
+          : (cached.isNotEmpty ? cached.length : 20);
     } catch (_) {}
 
-
-    if (q.contains('halo') || q.contains('hai') || q.contains('pagi') || q.contains('siang') || q.contains('sore') || q.contains('malam') || q.contains('assalam')) {
+    if (q.contains('halo') ||
+        q.contains('hai') ||
+        q.contains('pagi') ||
+        q.contains('siang') ||
+        q.contains('sore') ||
+        q.contains('malam') ||
+        q.contains('assalam')) {
       return 'Halo! Senang sekali bisa menyapamu 😊 Saya **Sahabat Asuh AI**, asisten resmi platform AsuhKita.\n\n'
-          'Saya siap membantumu seputar profil $totalChildren anak asuh, cara sponsorship, jadwal video call & audit 4 zona waktu, transparansi nota belanja, peta panti LBS, hingga donasi langkah & game gyroscope. Apa yang ingin kamu ketahui hari ini?';
+          'Saya siap membantumu seputar profil $totalChildren anak asuh, cara sponsorship, jadwal video call & audit 4 zona waktu, transparansi nota belanja, hingga donasi langkah & game gyroscope. Apa yang ingin kamu ketahui hari ini?';
     }
-    if (q.contains('siapa kamu') || q.contains('kamu siapa') || q.contains('nama kamu') || q.contains('tentang kamu') || q.contains('bisa apa')) {
+    if (q.contains('siapa kamu') ||
+        q.contains('kamu siapa') ||
+        q.contains('nama kamu') ||
+        q.contains('tentang kamu') ||
+        q.contains('bisa apa')) {
       return 'Saya adalah **Sahabat Asuh AI**, asisten cerdas yang terintegrasi langsung di aplikasi AsuhKita. Tugas saya meliputi:\n'
           '1. **Informasi Anak Asuh**: Memberikan rekomendasi anak asuh berdasarkan kebutuhan prioritas (Pendidikan, Nutrisi, Kesehatan, Harian).\n'
           '2. **Panduan Sponsorship & Donasi**: Menjelaskan paket bantuan, pembayaran, dan konversi 5 mata uang asing.\n'
@@ -326,8 +442,13 @@ class GeminiService {
           '4. **Transparansi & Aktivitas Donatur**: Menjelaskan bukti penyaluran dana, jadwal video call, sensor pedometer, dan mini game gyroscope.';
     }
 
-
-    if (q.contains('sepatu') || q.contains('seragam') || q.contains('buku') || q.contains('tas') || q.contains('spp') || q.contains('sekolah') || q.contains('pendidikan')) {
+    if (q.contains('sepatu') ||
+        q.contains('seragam') ||
+        q.contains('buku') ||
+        q.contains('tas') ||
+        q.contains('spp') ||
+        q.contains('sekolah') ||
+        q.contains('pendidikan')) {
       return '📚 **Kebutuhan Pendidikan & Perlengkapan Sekolah Anak Asuh**\n\n'
           'Di panti asuhan Peduli Anak, beberapa anak asuh yang sangat membutuhkan perlengkapan sekolah saat ini antara lain:\n'
           '• **Arfa Pratama (8 th)**: Membutuhkan seragam baru dan buku matematika (Target: Rp 850.000).\n'
@@ -338,7 +459,12 @@ class GeminiService {
           '💡 *Cara membantu:* Buka tab **Sponsor**, pilih anak di atas, lalu pilih **Paket Pendidikan**!';
     }
 
-    if (q.contains('nutrisi') || q.contains('gizi') || q.contains('makanan') || q.contains('susu') || q.contains('sembako') || q.contains('lapar')) {
+    if (q.contains('nutrisi') ||
+        q.contains('gizi') ||
+        q.contains('makanan') ||
+        q.contains('susu') ||
+        q.contains('sembako') ||
+        q.contains('lapar')) {
       return '🥛 **Kebutuhan Nutrisi, Gizi, & Susu Pertumbuhan**\n\n'
           'Untuk asupan makanan bergizi dan susu pertumbuhan anak-anak di panti asuhan:\n'
           '• **Bulan Ramadhani (7 th)**: Membutuhkan susu kalori tinggi dan suplemen vitamin (Target: Rp 650.000).\n'
@@ -347,7 +473,12 @@ class GeminiService {
           '💡 Anda dapat menyalurkan bantuan melalui **Paket Nutrisi & Gizi** pada menu Sponsor!';
     }
 
-    if (q.contains('sehat') || q.contains('kesehatan') || q.contains('obat') || q.contains('dokter') || q.contains('sakit') || q.contains('mata')) {
+    if (q.contains('sehat') ||
+        q.contains('kesehatan') ||
+        q.contains('obat') ||
+        q.contains('dokter') ||
+        q.contains('sakit') ||
+        q.contains('mata')) {
       return '🩺 **Kebutuhan Kesehatan & Perawatan Medis**\n\n'
           'Dukungan kesehatan anak asuh panti meliputi:\n'
           '• **Gita Kirana (7 th)**: Membutuhkan pemeriksaan kesehatan mata berkala dan kacamata koreksi (Target: Rp 600.000).\n'
@@ -355,8 +486,14 @@ class GeminiService {
           'Seluruh pengeluaran obat dan biaya dokter dicatat secara transparan dengan foto nota kuitansi yang dapat diaudit di Dashboard Keuangan.';
     }
 
-
-    if (q.contains('daftar anak') || q.contains('siapa saja') || q.contains('berapa anak') || q.contains('nama anak') || q.contains('umur') || q.contains('usia') || q.contains('cita-cita') || q.contains('hobi')) {
+    if (q.contains('daftar anak') ||
+        q.contains('siapa saja') ||
+        q.contains('berapa anak') ||
+        q.contains('nama anak') ||
+        q.contains('umur') ||
+        q.contains('usia') ||
+        q.contains('cita-cita') ||
+        q.contains('hobi')) {
       return '👧👦 **Profil Anak Asuh di AsuhKita**\n\n'
           'Saat ini terdapat **$totalChildren anak asuh** yang terdata di sistem asrama Peduli Anak Lombok (rentang usia 6 - 13 tahun), di antaranya:\n'
           '1. **Arfa** (8 th) - Cita-cita: Arsitek | Hobi: Menggambar\n'
@@ -372,8 +509,14 @@ class GeminiService {
           'Semua profil lengkap dengan foto dan cerita latar belakang dapat dilihat di menu **Sponsor**.';
     }
 
-
-    if (q.contains('jadwal') || q.contains('zona') || q.contains('wib') || q.contains('wita') || q.contains('wit') || q.contains('london') || q.contains('jam') || q.contains('waktu')) {
+    if (q.contains('jadwal') ||
+        q.contains('zona') ||
+        q.contains('wib') ||
+        q.contains('wita') ||
+        q.contains('wit') ||
+        q.contains('london') ||
+        q.contains('jam') ||
+        q.contains('waktu')) {
       return '⏰ **Fitur Jadwal & Sinkronisasi 4 Zona Waktu Serentak**\n\n'
           'AsuhKita menghadirkan konversi waktu otomatis ke 4 zona waktu dunia:\n'
           '1. **WIB (UTC+7)**: Jakarta, Jawa, Sumatra, Kalimantan Barat.\n'
@@ -385,8 +528,14 @@ class GeminiService {
           '• **Untuk Admin Panti:** Menetapkan tenggat waktu pembuatan & audit Laporan Keuangan secara serentak agar donatur global mengetahui kapan laporan dirilis.';
     }
 
-
-    if (q.contains('laporan') || q.contains('keuangan') || q.contains('nota') || q.contains('kuitansi') || q.contains('belanja') || q.contains('audit') || q.contains('kas') || q.contains('saldo')) {
+    if (q.contains('laporan') ||
+        q.contains('keuangan') ||
+        q.contains('nota') ||
+        q.contains('kuitansi') ||
+        q.contains('belanja') ||
+        q.contains('audit') ||
+        q.contains('kas') ||
+        q.contains('saldo')) {
       return '📊 **Transparansi Laporan Keuangan & Nota Belanja**\n\n'
           'Prinsip keuangan di AsuhKita mengusung **Transparansi 100% Bebas Manipulasi**:\n'
           '• **Laporan Per Anak**: Setiap rupiah yang didonasikan dikelompokkan ke rekening kas masing-masing anak tanpa dobel pencatatan.\n'
@@ -395,8 +544,14 @@ class GeminiService {
           '• **Audit Publik**: Donatur dapat memantau kas saldo panti secara real-time dan melihat rincian nota belanja di Dashboard Keuangan.';
     }
 
-
-    if (q.contains('blockchain') || q.contains('ledger') || q.contains('transparan') || q.contains('hash') || q.contains('sha') || q.contains('sertifikat') || q.contains('palsu') || q.contains('rekayasa')) {
+    if (q.contains('blockchain') ||
+        q.contains('ledger') ||
+        q.contains('transparan') ||
+        q.contains('hash') ||
+        q.contains('sha') ||
+        q.contains('sertifikat') ||
+        q.contains('palsu') ||
+        q.contains('rekayasa')) {
       return '⛓️ **Sistem Blockchain Ledger & Deteksi Sertifikat Rekayasa**\n\n'
           'Setiap transaksi donasi dan nota belanja di AsuhKita dilindungi teknologi terdesentralisasi:\n'
           '• **Hash Chaining**: Setiap transaksi baru mengunci hash blok sebelumnya dengan algoritma SHA-256. Jika data diubah 1 huruf saja, seluruh rantai akan terputus.\n'
@@ -404,8 +559,14 @@ class GeminiService {
           '• **Uji Deteksi Sertifikat Palsu / Rekayasa**: Di menu **Blockchain Ledger**, terdapat tombol preset cepat **"🚨 Sertifikat Rekayasa/Palsu (Demo Dosen)"** yang membuktikan bahwa sertifikat manipulasi pihak ketiga akan langsung DITOLAK oleh konsensus blockchain.';
     }
 
-
-    if (q.contains('poin') || q.contains('game') || q.contains('langkah') || q.contains('pedometer') || q.contains('gyro') || q.contains('ranking') || q.contains('badge') || q.contains('peringkat')) {
+    if (q.contains('poin') ||
+        q.contains('game') ||
+        q.contains('langkah') ||
+        q.contains('pedometer') ||
+        q.contains('gyro') ||
+        q.contains('ranking') ||
+        q.contains('badge') ||
+        q.contains('peringkat')) {
       return '⭐ **Poin Kebaikan, Donasi Langkah, & Game Gyroscope**\n\n'
           'Anda bisa berbuat kebaikan tanpa harus selalu menggunakan uang tunai:\n'
           '1. **Donasi Langkah (Pedometer)**: Menggunakan sensor accelerometer HP Anda. Setiap 20 langkah bernilai 1 Poin Kebaikan!\n'
@@ -417,18 +578,15 @@ class GeminiService {
           '• 5.000 - 9.999 Poin: **Duta Asuh Mulia** 💎\n'
           '• ≥ 10.000 Poin: **Pahlawan Kebaikan Utama** 🏆';
     }
-
-
-    if (q.contains('peta') || q.contains('lbs') || q.contains('rute') || q.contains('jarak') || q.contains('lokasi') || q.contains('kunjungan') || q.contains('check in') || q.contains('gps')) {
-      return '📍 **Peta Panti LBS & Fitur Check-In Kunjungan**\n\n'
-          'Fitur berbasis lokasi (Location-Based Service) di AsuhKita:\n'
-          '• **Deteksi GPS**: Menentukan posisi akurat Anda terhadap panti asuhan mitra.\n'
-          '• **Rute Navigasi OpenStreetMap**: Menampilkan garis panduan perjalanan lengkap dengan jarak (km) dan estimasi waktu tempuh.\n'
-          '• **Check-In Kunjungan Fisik**: Tombol check-in hanya dapat ditekan jika Anda berada dalam radius **100 meter** dari lokasi panti untuk mencegah klaim kunjungan fiktif.';
-    }
-
-
-    if (q.contains('kurs') || q.contains('mata uang') || q.contains('valuta') || q.contains('usd') || q.contains('dollar') || q.contains('euro') || q.contains('eur') || q.contains('sgd') || q.contains('sar')) {
+    if (q.contains('kurs') ||
+        q.contains('mata uang') ||
+        q.contains('valuta') ||
+        q.contains('usd') ||
+        q.contains('dollar') ||
+        q.contains('euro') ||
+        q.contains('eur') ||
+        q.contains('sgd') ||
+        q.contains('sar')) {
       return '💱 **Dukungan 5 Mata Uang Asing & Konversi Real-Time**\n\n'
           'AsuhKita memfasilitasi donatur dari berbagai negara dengan pilihan mata uang:\n'
           '• **IDR**: Rupiah Indonesia\n'
@@ -439,8 +597,13 @@ class GeminiService {
           'Sistem mengonversi secara otomatis dengan kurs terstandarisasi sehingga donasi Anda tetap tercatat tepat dalam pembukuan panti.';
     }
 
-
-    if (q.contains('surat') || q.contains('video call') || q.contains('chat') || q.contains('telepon') || q.contains('ruang kasih') || q.contains('komunikasi') || q.contains('rapor')) {
+    if (q.contains('surat') ||
+        q.contains('video call') ||
+        q.contains('chat') ||
+        q.contains('telepon') ||
+        q.contains('ruang kasih') ||
+        q.contains('komunikasi') ||
+        q.contains('rapor')) {
       return '💌 **Ruang Kasih & Komunikasi Hangat dengan Anak Asuh**\n\n'
           'Mendukung keterikatan batin antara orang tua asuh dan anak:\n'
           '• **Kirim Surat AI**: Gunakan tab **"Tulis Surat"** untuk meminta Sahabat Asuh AI membuat draf surat penyemangat belajar yang santun dan menyentuh hati.\n'
@@ -448,8 +611,14 @@ class GeminiService {
           '• **Pantau Karya & Rapor**: Lihat perkembangan nilai sekolah dan gambar karya seni anak secara berkala.';
     }
 
-
-    if (q.contains('akun') || q.contains('login') || q.contains('daftar') || q.contains('register') || q.contains('sidik jari') || q.contains('biometrik') || q.contains('password') || q.contains('logout')) {
+    if (q.contains('akun') ||
+        q.contains('login') ||
+        q.contains('daftar') ||
+        q.contains('register') ||
+        q.contains('sidik jari') ||
+        q.contains('biometrik') ||
+        q.contains('password') ||
+        q.contains('logout')) {
       return '🔐 **Keamanan Akun & Fitur Login Biometrik**\n\n'
           '• **Enkripsi Sandi**: Password di-hash menggunakan SHA-256 dan salt unik sebelum disimpan.\n'
           '• **Secure Storage AES-256**: Sesi login disimpan di enkripsi hardware perangkat sehingga bebas dari pencurian token.\n'
@@ -457,17 +626,25 @@ class GeminiService {
           '• **Logout Bersih**: Sesi lokal dihapus seketika (< 100 ms) dengan dialog animasi berlogo AsuhKita.';
     }
 
-
-    if (q.contains('panti') || q.contains('peduli anak') || q.contains('legal') || q.contains('resmi') || q.contains('alamat') || q.contains('kontak')) {
+    if (q.contains('panti') ||
+        q.contains('peduli anak') ||
+        q.contains('legal') ||
+        q.contains('resmi') ||
+        q.contains('alamat') ||
+        q.contains('kontak')) {
       return '🏡 **Panti Asuhan Mitra: Peduli Anak Foundation**\n\n'
           '• **Lokasi**: Jl. Dharma Bhakti, Desa Langko, Kec. Lingsar, Lombok Barat, NTB 83371.\n'
           '• **Fokus Asuhan**: Menampung anak yatim, piatu, dan dhuafa dengan fasilitas asrama, sekolah dasar terakreditasi, fasilitas medis, dan area olahraga ramah anak.\n'
           '• **Legalitas**: Lembaga Kesejahteraan Sosial Anak (LKSA) resmi terdaftar di Kementerian Sosial Republik Indonesia.\n'
-          '• **Kunjungan**: Anda dipersilakan berkunjung langsung dengan menjadwalkan kunjungan di aplikasi atau memanfaatkan navigasi Peta LBS.';
+          '• **Kunjungan**: Anda dipersilakan berkunjung langsung dengan menjadwalkan kunjungan melalui aplikasi.';
     }
 
-
-    if (q.contains('cara donasi') || q.contains('cara bayar') || q.contains('gimana donasi') || q.contains('langkah donasi') || q.contains('mau donasi') || q.contains('transfer')) {
+    if (q.contains('cara donasi') ||
+        q.contains('cara bayar') ||
+        q.contains('gimana donasi') ||
+        q.contains('langkah donasi') ||
+        q.contains('mau donasi') ||
+        q.contains('transfer')) {
       return '💖 **Panduan Mudah Berdonasi di AsuhKita**\n\n'
           '1. Masuk ke tab **Sponsor** di menu navigasi bawah.\n'
           '2. Pilih anak asuh yang ingin Anda dampingi.\n'
@@ -476,14 +653,16 @@ class GeminiService {
           '5. Konfirmasi pembayaran dan sertifikat resmi ber-QR blockchain akan langsung terbit untuk Anda!';
     }
 
-
-    if (q.contains('saran') || q.contains('kesan') || q.contains('feedback') || q.contains('ulasan') || q.contains('kritik')) {
+    if (q.contains('saran') ||
+        q.contains('kesan') ||
+        q.contains('feedback') ||
+        q.contains('ulasan') ||
+        q.contains('kritik')) {
       return '📝 **Fitur Saran & Kesan (Feedback) Lintas Akun**\n\n'
           'Kami sangat menghargai masukan Anda! Di menu **Saran & Kesan**:\n'
           '• Anda dapat memberikan bintang penilaian (rating) dan menuliskan kesan pengalaman Anda menggunakan AsuhKita.\n'
           '• Seluruh feedback tersinkronisasi secara global dan persisten sehingga dapat dibaca bersama oleh donatur lain maupun admin panti asuhan.';
     }
-
 
     return 'Terima kasih atas pertanyaannya! Di AsuhKita saat ini terdapat **$totalChildren anak asuh** yang siap menerima dampingan donasi pendidikan, nutrisi, dan kesehatan.\n\n'
         'Anda dapat menjelajahi menu **Sponsor** untuk memilih anak asuh, membuka **Dashboard Keuangan** untuk memeriksa transparansi nota belanja, atau menjadwalkan panggilan video ramah anak di fitur **Jadwal 4 Zona Waktu**. Ada yang ingin ditanyakan lebih rinci?';

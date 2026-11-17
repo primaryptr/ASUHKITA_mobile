@@ -1,9 +1,10 @@
-
-
-
 import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../core/app_colors.dart';
 import '../../core/dio_client.dart';
 import '../../data/local_db.dart';
@@ -36,6 +37,12 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
   List<Map<String, dynamic>> _childReceipts = [];
   String? _childDream;
   String? _childHobby;
+  DonationReminderFrequency _donationReminderFrequency =
+      DonationReminderFrequency.monthly;
+  DateTime _donationReminderDate = DateTime.now();
+  TimeOfDay _donationReminderTime = const TimeOfDay(hour: 9, minute: 0);
+  bool _isDonationReminderLoading = true;
+  bool _hasDonationReminder = false;
 
   final List<Map<String, dynamic>> _packages = [
     {
@@ -47,7 +54,8 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
     {
       'id': 'pkg_harian',
       'name': 'Paket Nutrisi & Harian',
-      'desc': 'Kebutuhan makan bergizi 3x sehari, susu berkalsium, dan vitamin.',
+      'desc':
+          'Kebutuhan makan bergizi 3x sehari, susu berkalsium, dan vitamin.',
       'monthly_idr': 150000,
     },
     {
@@ -63,6 +71,11 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
     super.initState();
     HomeScreen.refreshNotifier.addListener(_checkSponsorshipStatus);
     _checkSponsorshipStatus();
+    if (!Provider.of<AuthProvider>(context, listen: false).isAdmin) {
+      _loadDonationReminder();
+    } else {
+      _isDonationReminderLoading = false;
+    }
   }
 
   @override
@@ -71,10 +84,249 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
     super.dispose();
   }
 
+  String get _donationReminderPreferenceKey {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final donorIdentity = auth.userEmail.trim().isNotEmpty
+        ? auth.userEmail.trim().toLowerCase()
+        : auth.userName.trim().toLowerCase();
+    final childIdentity =
+        (widget.childData['id'] ??
+                widget.childData['alias'] ??
+                widget.childData['name'] ??
+                'child')
+            .toString()
+            .trim();
+    final encoded = base64Url
+        .encode(utf8.encode('$donorIdentity|$childIdentity'))
+        .replaceAll('=', '');
+    return 'donation_reminder_$encoded';
+  }
+
+  int get _donationReminderNotificationId {
+    final digest = sha256.convert(utf8.encode(_donationReminderPreferenceKey));
+    final hash = digest.bytes
+        .take(4)
+        .fold<int>(0, (value, byte) => (value << 8) | byte);
+    return 0x60000000 | (hash & 0x0FFFFFFF);
+  }
+
+  Future<void> _loadDonationReminder() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final savedReminder = preferences.getString(
+        _donationReminderPreferenceKey,
+      );
+      if (savedReminder != null) {
+        final decoded = jsonDecode(savedReminder);
+        if (decoded is! Map) {
+          throw const FormatException('Format pengingat donasi tidak valid.');
+        }
+        final data = Map<String, dynamic>.from(decoded);
+        final savedDate = DateTime.tryParse(data['dateTime']?.toString() ?? '');
+        final frequencyName = data['frequency']?.toString();
+        final matchingFrequencies = DonationReminderFrequency.values.where(
+          (frequency) => frequency.name == frequencyName,
+        );
+        if (savedDate == null || matchingFrequencies.isEmpty) {
+          throw const FormatException('Data pengingat donasi tidak lengkap.');
+        }
+        final savedFrequency = matchingFrequencies.first;
+        if (mounted) {
+          setState(() {
+            _donationReminderDate = savedDate;
+            _donationReminderTime = TimeOfDay.fromDateTime(savedDate);
+            _donationReminderFrequency = savedFrequency;
+            _hasDonationReminder = true;
+          });
+        }
+      }
+    } catch (error) {
+      _showDonationReminderMessage(
+        'Pengingat donasi tidak dapat dimuat: $error',
+        isError: true,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isDonationReminderLoading = false);
+      }
+    }
+  }
+
+  DateTime _selectedDonationReminderDateTime() {
+    return DateTime(
+      _donationReminderDate.year,
+      _donationReminderDate.month,
+      _donationReminderDate.day,
+      _donationReminderTime.hour,
+      _donationReminderTime.minute,
+    );
+  }
+
+  DateTime _firstFutureDonationReminder() {
+    var occurrence = _selectedDonationReminderDateTime();
+    final now = DateTime.now();
+    switch (_donationReminderFrequency) {
+      case DonationReminderFrequency.daily:
+        while (!occurrence.isAfter(now)) {
+          occurrence = occurrence.add(const Duration(days: 1));
+        }
+        break;
+      case DonationReminderFrequency.weekly:
+        while (!occurrence.isAfter(now)) {
+          occurrence = occurrence.add(const Duration(days: 7));
+        }
+        break;
+      case DonationReminderFrequency.monthly:
+        final requestedDay = occurrence.day;
+        var year = occurrence.year;
+        var month = occurrence.month;
+        while (!occurrence.isAfter(now)) {
+          month++;
+          if (month > 12) {
+            year++;
+            month = 1;
+          }
+          final lastDayOfMonth = DateTime(year, month + 1, 0).day;
+          if (requestedDay <= lastDayOfMonth) {
+            occurrence = DateTime(
+              year,
+              month,
+              requestedDay,
+              occurrence.hour,
+              occurrence.minute,
+            );
+          }
+        }
+        break;
+    }
+    return occurrence;
+  }
+
+  Future<void> _pickDonationReminderDate() async {
+    final now = DateTime.now();
+    final selectedDate = await showDatePicker(
+      context: context,
+      initialDate: _donationReminderDate.isBefore(now)
+          ? DateTime(now.year, now.month, now.day)
+          : _donationReminderDate,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: DateTime(now.year + 5),
+    );
+    if (selectedDate != null && mounted) {
+      setState(() => _donationReminderDate = selectedDate);
+    }
+  }
+
+  Future<void> _pickDonationReminderTime() async {
+    final selectedTime = await showTimePicker(
+      context: context,
+      initialTime: _donationReminderTime,
+    );
+    if (selectedTime != null && mounted) {
+      setState(() => _donationReminderTime = selectedTime);
+    }
+  }
+
+  Future<void> _saveDonationReminder() async {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final donorName = auth.userName.trim().isNotEmpty
+        ? auth.userName.trim()
+        : 'Donatur AsuhKita';
+    final alias =
+        (widget.childData['alias'] ?? widget.childData['name'] ?? 'Anak Asuh')
+            .toString();
+    final selectedDateTime = _selectedDonationReminderDateTime();
+    final scheduledDateTime = _firstFutureDonationReminder();
+
+    setState(() => _isDonationReminderLoading = true);
+    try {
+      await NotificationService().scheduleDonationReminder(
+        id: _donationReminderNotificationId,
+        donatorName: donorName,
+        childAlias: alias,
+        scheduledDateTime: scheduledDateTime,
+        frequency: _donationReminderFrequency,
+      );
+      final preferences = await SharedPreferences.getInstance();
+      final saved = await preferences.setString(
+        _donationReminderPreferenceKey,
+        jsonEncode({
+          'dateTime': selectedDateTime.toIso8601String(),
+          'frequency': _donationReminderFrequency.name,
+        }),
+      );
+      if (!saved) {
+        await NotificationService().cancel(_donationReminderNotificationId);
+        throw StateError('Pengaturan pengingat tidak berhasil disimpan.');
+      }
+      if (mounted) {
+        setState(() {
+          _hasDonationReminder = true;
+          _isDonationReminderLoading = false;
+        });
+      }
+      _showDonationReminderMessage('Pengingat donasi berhasil disimpan.');
+    } catch (error) {
+      if (mounted) {
+        setState(() => _isDonationReminderLoading = false);
+      }
+      _showDonationReminderMessage(
+        'Pengingat donasi gagal disimpan: $error',
+        isError: true,
+      );
+    }
+  }
+
+  Future<void> _removeDonationReminder() async {
+    setState(() => _isDonationReminderLoading = true);
+    try {
+      await NotificationService().cancel(_donationReminderNotificationId);
+      final preferences = await SharedPreferences.getInstance();
+      final removed = await preferences.remove(_donationReminderPreferenceKey);
+      if (!removed) {
+        throw StateError('Pengaturan pengingat tidak ditemukan.');
+      }
+      if (mounted) {
+        setState(() {
+          _hasDonationReminder = false;
+          _isDonationReminderLoading = false;
+        });
+      }
+      _showDonationReminderMessage('Pengingat donasi berhasil dibatalkan.');
+    } catch (error) {
+      if (mounted) {
+        setState(() => _isDonationReminderLoading = false);
+      }
+      _showDonationReminderMessage(
+        'Pengingat donasi gagal dibatalkan: $error',
+        isError: true,
+      );
+    }
+  }
+
+  void _showDonationReminderMessage(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: isError ? Colors.red.shade700 : AppColors.primary,
+        ),
+      );
+  }
+
   Future<void> _checkSponsorshipStatus() async {
     try {
-      final childAlias = (widget.childData['alias'] ?? widget.childData['name'] ?? '').toString().trim().toLowerCase();
-      final childId = (widget.childData['id'] ?? '').toString().trim().toLowerCase();
+      final childAlias =
+          (widget.childData['alias'] ?? widget.childData['name'] ?? '')
+              .toString()
+              .trim()
+              .toLowerCase();
+      final childId = (widget.childData['id'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
       final localDonations = await LocalDatabase().getCachedDonations();
       int total = 0;
       final matched = <Map<String, dynamic>>[];
@@ -91,15 +343,19 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
       for (var d in localDonations) {
         final dEmail = (d['donor_email'] ?? '').toString().toLowerCase().trim();
         final dName = (d['donor_name'] ?? '').toString().toLowerCase().trim();
-        final isMyDonation = (myEmail.isNotEmpty && dEmail == myEmail) ||
+        final isMyDonation =
+            (myEmail.isNotEmpty && dEmail == myEmail) ||
             (myName.isNotEmpty && (dName == myName || dName == myEmail));
         final dAlias = (d['child_alias'] ?? '').toString().trim().toLowerCase();
         final dChildId = (d['child_id'] ?? '').toString().trim().toLowerCase();
-        final isChildMatch = (dAlias.isNotEmpty && dAlias == childAlias) ||
+        final isChildMatch =
+            (dAlias.isNotEmpty && dAlias == childAlias) ||
             (childId.isNotEmpty && (dChildId == childId || dAlias == childId));
         if (isMyDonation && isChildMatch) {
           matched.add(d);
-          final amt = (d['amount_idr'] is num) ? (d['amount_idr'] as num).toInt() : 0;
+          final amt = (d['amount_idr'] is num)
+              ? (d['amount_idr'] as num).toInt()
+              : 0;
           total += amt;
         }
       }
@@ -108,14 +364,18 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
       try {
         final newKids = await LocalDatabase().getNewChildren();
         final match = newKids.firstWhere(
-          (k) => (k['name'] ?? k['alias'] ?? '').toString().trim().toLowerCase() == childAlias,
+          (k) =>
+              (k['name'] ?? k['alias'] ?? '').toString().trim().toLowerCase() ==
+              childAlias,
           orElse: () => {},
         );
         if (match.isNotEmpty) {
-          if (match['dream'] != null && match['dream'].toString().trim().isNotEmpty) {
+          if (match['dream'] != null &&
+              match['dream'].toString().trim().isNotEmpty) {
             _childDream = match['dream'].toString().trim();
           }
-          if (match['hobby'] != null && match['hobby'].toString().trim().isNotEmpty) {
+          if (match['hobby'] != null &&
+              match['hobby'].toString().trim().isNotEmpty) {
             _childHobby = match['hobby'].toString().trim();
           }
         }
@@ -123,12 +383,19 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
 
       List<Map<String, dynamic>> loadedReports = [];
       try {
-        final repRes = await DioClient().dio.get('/reports', queryParameters: {
-          if (childId.isNotEmpty) 'child_id': widget.childData['id'],
-        });
-        if (repRes.statusCode == 200 && repRes.data is Map && repRes.data['data'] is List) {
+        final repRes = await DioClient().dio.get(
+          '/reports',
+          queryParameters: {
+            if (childId.isNotEmpty) 'child_id': widget.childData['id'],
+          },
+        );
+        if (repRes.statusCode == 200 &&
+            repRes.data is Map &&
+            repRes.data['data'] is List) {
           loadedReports = List<Map<String, dynamic>>.from(
-            (repRes.data['data'] as List).map((e) => Map<String, dynamic>.from(e as Map)),
+            (repRes.data['data'] as List).map(
+              (e) => Map<String, dynamic>.from(e as Map),
+            ),
           );
           if (loadedReports.isNotEmpty) {
             await LocalDatabase().cacheProgressReports(loadedReports);
@@ -139,19 +406,27 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
         try {
           loadedReports = await LocalDatabase().getCachedProgressReports(
             childId: widget.childData['id']?.toString(),
-            childAlias: (widget.childData['alias'] ?? widget.childData['name'])?.toString(),
+            childAlias: (widget.childData['alias'] ?? widget.childData['name'])
+                ?.toString(),
           );
         } catch (_) {}
       }
 
       List<Map<String, dynamic>> loadedWishlists = [];
       try {
-        final wlRes = await DioClient().dio.get('/wishlists', queryParameters: {
-          if (childId.isNotEmpty) 'child_id': widget.childData['id'],
-        });
-        if (wlRes.statusCode == 200 && wlRes.data is Map && wlRes.data['data'] is List) {
+        final wlRes = await DioClient().dio.get(
+          '/wishlists',
+          queryParameters: {
+            if (childId.isNotEmpty) 'child_id': widget.childData['id'],
+          },
+        );
+        if (wlRes.statusCode == 200 &&
+            wlRes.data is Map &&
+            wlRes.data['data'] is List) {
           loadedWishlists = List<Map<String, dynamic>>.from(
-            (wlRes.data['data'] as List).map((e) => Map<String, dynamic>.from(e as Map)),
+            (wlRes.data['data'] as List).map(
+              (e) => Map<String, dynamic>.from(e as Map),
+            ),
           );
           if (loadedWishlists.isNotEmpty) {
             await LocalDatabase().cacheWishlists(loadedWishlists);
@@ -162,7 +437,8 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
         try {
           loadedWishlists = await LocalDatabase().getCachedWishlists(
             childId: widget.childData['id']?.toString(),
-            childAlias: (widget.childData['alias'] ?? widget.childData['name'])?.toString(),
+            childAlias: (widget.childData['alias'] ?? widget.childData['name'])
+                ?.toString(),
           );
         } catch (_) {}
       }
@@ -172,18 +448,28 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
         try {
           final allReceipts = await LocalDatabase().getReceipts();
           loadedReceipts = allReceipts.where((r) {
-            final rName = (r['childName'] ?? '').toString().trim().toLowerCase();
-            return rName == childAlias || (childId.isNotEmpty && rName == childId);
+            final rName = (r['childName'] ?? '')
+                .toString()
+                .trim()
+                .toLowerCase();
+            return rName == childAlias ||
+                (childId.isNotEmpty && rName == childId);
           }).toList();
         } catch (_) {}
 
-        final rawBirth = (widget.childData['birth_date'] ?? '').toString().trim();
+        final rawBirth = (widget.childData['birth_date'] ?? '')
+            .toString()
+            .trim();
         final parsedBirth = DateTime.tryParse(rawBirth);
         if (parsedBirth != null) {
           try {
             await NotificationService().scheduleChildBirthdayReminder(
               childId: childId.isNotEmpty ? childId : childAlias,
-              childAlias: (widget.childData['alias'] ?? widget.childData['name'] ?? 'Anak Asuh').toString(),
+              childAlias:
+                  (widget.childData['alias'] ??
+                          widget.childData['name'] ??
+                          'Anak Asuh')
+                      .toString(),
               birthDate: parsedBirth,
             );
           } catch (_) {}
@@ -252,7 +538,10 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [chipColor.withValues(alpha: 0.08), chipColor.withValues(alpha: 0.03)],
+          colors: [
+            chipColor.withValues(alpha: 0.08),
+            chipColor.withValues(alpha: 0.03),
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -278,27 +567,42 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: chipColor.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
                         category,
-                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: chipColor),
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: chipColor,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 6),
                     Text(
                       dateLabel,
-                      style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: AppColors.textSecondary,
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(
                   statusText,
-                  style: const TextStyle(fontSize: 13, color: AppColors.textPrimary, fontWeight: FontWeight.w500, height: 1.3),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w500,
+                    height: 1.3,
+                  ),
                 ),
               ],
             ),
@@ -319,12 +623,20 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
           children: [
             const Row(
               children: [
-                Icon(Icons.card_giftcard_outlined, color: AppColors.primary, size: 20),
+                Icon(
+                  Icons.card_giftcard_outlined,
+                  color: AppColors.primary,
+                  size: 20,
+                ),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Kebutuhan Spesifik Mendesak (Wishlist)',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ),
               ],
@@ -338,21 +650,25 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
             else
               Column(
                 children: _childWishlists.map((w) {
-                  final itemName = (w['item_name'] ?? 'Kebutuhan Anak').toString();
+                  final itemName = (w['item_name'] ?? 'Kebutuhan Anak')
+                      .toString();
                   final est = (w['estimated_idr'] is num)
                       ? (w['estimated_idr'] as num).toDouble()
-                      : double.tryParse(w['estimated_idr']?.toString() ?? '0') ?? 0.0;
+                      : double.tryParse(
+                              w['estimated_idr']?.toString() ?? '0',
+                            ) ??
+                            0.0;
                   final status = (w['status'] ?? 'open').toString();
                   final statusLabel = status == 'fulfilled'
                       ? 'Sudah Disalurkan'
                       : status == 'funded'
-                          ? 'Terpenuhi Donatur'
-                          : 'Butuh Dukungan';
+                      ? 'Terpenuhi Donatur'
+                      : 'Butuh Dukungan';
                   final statusColor = status == 'fulfilled'
                       ? Colors.green
                       : status == 'funded'
-                          ? Colors.blue
-                          : Colors.orange;
+                      ? Colors.blue
+                      : Colors.orange;
 
                   return Container(
                     margin: const EdgeInsets.only(bottom: 10),
@@ -360,7 +676,9 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                     decoration: BoxDecoration(
                       color: AppColors.surfaceLight,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: statusColor.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -369,17 +687,30 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Expanded(
-                              child: Text(itemName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                              child: Text(
+                                itemName,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
                               decoration: BoxDecoration(
                                 color: statusColor.withValues(alpha: 0.14),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
                                 statusLabel,
-                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: statusColor,
+                                ),
                               ),
                             ),
                           ],
@@ -387,7 +718,11 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                         const SizedBox(height: 4),
                         Text(
                           'Estimasi: ${_formatRupiah(est)}',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.primaryDark),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.primaryDark,
+                          ),
                         ),
                         if (status == 'open') ...[
                           const SizedBox(height: 8),
@@ -411,13 +746,26 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                                 );
                                 await _checkSponsorshipStatus();
                               },
-                              icon: const Icon(Icons.volunteer_activism, size: 16),
-                              label: const Text('Penuhi Kebutuhan Ini', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              icon: const Icon(
+                                Icons.volunteer_activism,
+                                size: 16,
+                              ),
+                              label: const Text(
+                                'Penuhi Kebutuhan Ini',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppColors.primary,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 8,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
                               ),
                             ),
                           ),
@@ -444,12 +792,20 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
           children: [
             const Row(
               children: [
-                Icon(Icons.receipt_long_outlined, color: AppColors.primary, size: 20),
+                Icon(
+                  Icons.receipt_long_outlined,
+                  color: AppColors.primary,
+                  size: 20,
+                ),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Jejak Penyaluran Dana',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ),
               ],
@@ -464,17 +820,28 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
               Column(
                 children: _childReceipts.map((r) {
                   final imgRaw = (r['receiptImage'] ?? '').toString().trim();
-                  Widget thumb = const Icon(Icons.receipt, color: AppColors.primary, size: 28);
+                  Widget thumb = const Icon(
+                    Icons.receipt,
+                    color: AppColors.primary,
+                    size: 28,
+                  );
                   if (imgRaw.startsWith('data:image')) {
                     try {
                       final bytes = base64Decode(imgRaw.split(',').last);
                       thumb = ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: Image.memory(bytes, width: 48, height: 48, fit: BoxFit.cover),
+                        child: Image.memory(
+                          bytes,
+                          width: 48,
+                          height: 48,
+                          fit: BoxFit.cover,
+                        ),
                       );
                     } catch (_) {}
                   }
-                  final amt = (r['amount'] is num) ? (r['amount'] as num).toDouble() : 0.0;
+                  final amt = (r['amount'] is num)
+                      ? (r['amount'] as num).toDouble()
+                      : 0.0;
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(10),
@@ -490,13 +857,31 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text((r['title'] ?? 'Penyaluran Dana').toString(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                              Text(
+                                (r['title'] ?? 'Penyaluran Dana').toString(),
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               Text(
                                 '${_formatRupiah(amt)} • ${(r['date'] ?? '').toString()}',
-                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.primaryDark),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.primaryDark,
+                                ),
                               ),
-                              if ((r['description'] ?? '').toString().isNotEmpty)
-                                Text(r['description'].toString(), style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                              if ((r['description'] ?? '')
+                                  .toString()
+                                  .isNotEmpty)
+                                Text(
+                                  r['description'].toString(),
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
                             ],
                           ),
                         ),
@@ -546,7 +931,10 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
               children: [
                 Text(
                   'Kirim Doa / Semangat untuk $alias',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Wrap(
@@ -576,11 +964,13 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                           ? null
                           : () async {
                               setSheetState(() => isGeneratingAi = true);
-                              final aiMsg = await GeminiService().generateLetter(
-                                childAlias: alias,
-                                topic: 'pesan doa dan semangat untuk $alias',
-                                donorName: donorName,
-                              );
+                              final aiMsg = await GeminiService()
+                                  .generateLetter(
+                                    childAlias: alias,
+                                    topic:
+                                        'pesan doa dan semangat untuk $alias',
+                                    donorName: donorName,
+                                  );
                               if (sCtx.mounted) {
                                 setSheetState(() {
                                   controller.text = aiMsg;
@@ -589,13 +979,20 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                               }
                             },
                       icon: const Icon(Icons.auto_awesome, size: 16),
-                      label: Text(isGeneratingAi ? 'Menyusun...' : 'Buat dengan AI', style: const TextStyle(fontSize: 12)),
+                      label: Text(
+                        isGeneratingAi ? 'Menyusun...' : 'Buat dengan AI',
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ),
                     const Spacer(),
                     ElevatedButton.icon(
-                      onPressed: () => Navigator.pop(sCtx, controller.text.trim()),
+                      onPressed: () =>
+                          Navigator.pop(sCtx, controller.text.trim()),
                       icon: const Icon(Icons.send, size: 16),
-                      label: const Text('Kirim ke Ruang Kasih', style: TextStyle(fontSize: 12)),
+                      label: const Text(
+                        'Kirim ke Ruang Kasih',
+                        style: TextStyle(fontSize: 12),
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
@@ -621,13 +1018,16 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
       );
     } catch (_) {}
     try {
-      await DioClient().dio.post('/letters', data: {
-        if (childId.isNotEmpty) 'child_id': childId,
-        'child_alias': alias,
-        'sender': 'donor',
-        'text': messageToSend,
-        'type': 'text',
-      });
+      await DioClient().dio.post(
+        '/letters',
+        data: {
+          if (childId.isNotEmpty) 'child_id': childId,
+          'child_alias': alias,
+          'sender': 'donor',
+          'text': messageToSend,
+          'type': 'text',
+        },
+      );
     } catch (_) {}
 
     if (mounted) {
@@ -640,7 +1040,11 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
     }
   }
 
-  Future<void> _activateBirthdayReminder(String alias, String childId, String rawBirthDate) async {
+  Future<void> _activateBirthdayReminder(
+    String alias,
+    String childId,
+    String rawBirthDate,
+  ) async {
     final parsed = DateTime.tryParse(rawBirthDate);
     if (parsed == null) return;
     try {
@@ -653,7 +1057,9 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Pengingat Ulang Tahun $alias (${parsed.day}/${parsed.month}) aktif! 🎂'),
+          content: Text(
+            'Pengingat Ulang Tahun $alias (${parsed.day}/${parsed.month}) aktif! 🎂',
+          ),
           backgroundColor: AppColors.primary,
         ),
       );
@@ -663,7 +1069,8 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
   Widget _buildPrayerAndBirthdayCard(Map<String, dynamic> child, String alias) {
     final childId = (child['id'] ?? '').toString();
     final rawBirthDate = (child['birth_date'] ?? '').toString().trim();
-    final hasBirthDate = rawBirthDate.isNotEmpty && DateTime.tryParse(rawBirthDate) != null;
+    final hasBirthDate =
+        rawBirthDate.isNotEmpty && DateTime.tryParse(rawBirthDate) != null;
 
     return Card(
       elevation: 1.5,
@@ -675,12 +1082,20 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
           children: [
             const Row(
               children: [
-                Icon(Icons.favorite_outline, color: AppColors.primary, size: 20),
+                Icon(
+                  Icons.favorite_outline,
+                  color: AppColors.primary,
+                  size: 20,
+                ),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Doa, Semangat & Momen Spesial',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ),
               ],
@@ -689,24 +1104,192 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
             ElevatedButton.icon(
               onPressed: () => _showQuickPrayerSheet(alias, childId),
               icon: const Icon(Icons.volunteer_activism, size: 18),
-              label: const Text('Kirim Doa / Semangat', style: TextStyle(fontWeight: FontWeight.bold)),
+              label: const Text(
+                'Kirim Doa / Semangat',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             ),
             if (hasBirthDate) ...[
               const SizedBox(height: 8),
               OutlinedButton.icon(
-                onPressed: () => _activateBirthdayReminder(alias, childId, rawBirthDate),
+                onPressed: () =>
+                    _activateBirthdayReminder(alias, childId, rawBirthDate),
                 icon: const Icon(Icons.cake_outlined, size: 18),
-                label: Text('Pasang Pengingat Ulang Tahun ($rawBirthDate)', style: const TextStyle(fontSize: 12)),
+                label: Text(
+                  'Pasang Pengingat Ulang Tahun ($rawBirthDate)',
+                  style: const TextStyle(fontSize: 12),
+                ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primaryDark,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _donationFrequencyLabel(DonationReminderFrequency frequency) {
+    switch (frequency) {
+      case DonationReminderFrequency.daily:
+        return 'Harian';
+      case DonationReminderFrequency.weekly:
+        return 'Mingguan';
+      case DonationReminderFrequency.monthly:
+        return 'Bulanan';
+    }
+  }
+
+  Widget _buildDonationReminderCard() {
+    final dateLabel =
+        '${_donationReminderDate.day.toString().padLeft(2, '0')}/'
+        '${_donationReminderDate.month.toString().padLeft(2, '0')}/'
+        '${_donationReminderDate.year}';
+
+    return Card(
+      elevation: 1.5,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Row(
+              children: [
+                Icon(
+                  Icons.notifications_active_outlined,
+                  color: AppColors.primary,
+                  size: 20,
+                ),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Pengingat Donasi',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Atur pengingat rutin untuk mendukung anak asuh ini.',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            if (_isDonationReminderLoading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: CircularProgressIndicator(
+                    color: AppColors.primary,
+                    strokeWidth: 2,
+                  ),
+                ),
+              )
+            else ...[
+              DropdownButtonFormField<DonationReminderFrequency>(
+                initialValue: _donationReminderFrequency,
+                decoration: const InputDecoration(
+                  labelText: 'Frekuensi',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                ),
+                items: DonationReminderFrequency.values
+                    .map(
+                      (frequency) =>
+                          DropdownMenuItem<DonationReminderFrequency>(
+                            value: frequency,
+                            child: Text(_donationFrequencyLabel(frequency)),
+                          ),
+                    )
+                    .toList(),
+                onChanged: (frequency) {
+                  if (frequency != null) {
+                    setState(() => _donationReminderFrequency = frequency);
+                  }
+                },
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickDonationReminderDate,
+                      icon: const Icon(Icons.calendar_today_outlined, size: 16),
+                      label: Text(
+                        dateLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickDonationReminderTime,
+                      icon: const Icon(Icons.access_time, size: 16),
+                      label: Text(_donationReminderTime.format(context)),
+                    ),
+                  ),
+                ],
+              ),
+              if (_donationReminderFrequency ==
+                  DonationReminderFrequency.monthly) ...[
+                const SizedBox(height: 4),
+                const Text(
+                  'Tanggal 29–31 mungkin tidak tersedia pada bulan tertentu.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+              if (_hasDonationReminder) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  'Pengingat donasi aktif.',
+                  style: TextStyle(
+                    color: AppColors.primaryDark,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              ElevatedButton.icon(
+                onPressed: _saveDonationReminder,
+                icon: const Icon(Icons.save_outlined, size: 18),
+                label: const Text('Simpan Pengingat'),
+              ),
+              if (_hasDonationReminder) ...[
+                const SizedBox(height: 6),
+                TextButton.icon(
+                  onPressed: _removeDonationReminder,
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  label: const Text('Batalkan Pengingat'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.red.shade700,
+                  ),
+                ),
+              ],
             ],
           ],
         ),
@@ -717,6 +1300,7 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final child = widget.childData;
+    final isAdmin = Provider.of<AuthProvider>(context, listen: false).isAdmin;
     final alias = (child['alias'] ?? child['name'] ?? 'Anak Asuh').toString();
     final age = child['age'] ?? 8;
     final gender = child['gender'] ?? 'Laki-laki';
@@ -724,10 +1308,23 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
     final orphanage = child['orphanage_name'] ?? 'Peduli Anak Foundation';
     final rawDream = _childDream ?? child['dream']?.toString();
     final rawHobby = _childHobby ?? child['hobby']?.toString();
-    final dream = (rawDream != null && rawDream.trim().isNotEmpty && rawDream.trim() != '-') ? rawDream.trim() : null;
-    final hobby = (rawHobby != null && rawHobby.trim().isNotEmpty && rawHobby.trim() != '-') ? rawHobby.trim() : null;
-    final category = child['need_category'] ?? child['urgentNeeds'] ?? 'Pendidikan';
-    final targetNum = (child['target'] is num) ? (child['target'] as num).toDouble() : 500000.0;
+    final dream =
+        (rawDream != null &&
+            rawDream.trim().isNotEmpty &&
+            rawDream.trim() != '-')
+        ? rawDream.trim()
+        : null;
+    final hobby =
+        (rawHobby != null &&
+            rawHobby.trim().isNotEmpty &&
+            rawHobby.trim() != '-')
+        ? rawHobby.trim()
+        : null;
+    final category =
+        child['need_category'] ?? child['urgentNeeds'] ?? 'Pendidikan';
+    final targetNum = (child['target'] is num)
+        ? (child['target'] as num).toDouble()
+        : 500000.0;
 
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
@@ -803,12 +1400,13 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-
             Container(
               padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
               decoration: const BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(24),
+                ),
               ),
               child: Column(
                 children: [
@@ -823,22 +1421,37 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                   const SizedBox(height: 12),
                   Text(
                     alias,
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.primaryDark),
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primaryDark,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'Usia: $age Tahun • $gender',
-                    style: const TextStyle(fontSize: 14, color: AppColors.textSecondary, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.apartment, size: 16, color: AppColors.primary),
+                      const Icon(
+                        Icons.apartment,
+                        size: 16,
+                        color: AppColors.primary,
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         '$orphanage ($city)',
-                        style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.textSecondary,
+                        ),
                       ),
                     ],
                   ),
@@ -862,7 +1475,11 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: Colors.amber.shade400, width: 1.5),
                   boxShadow: [
-                    BoxShadow(color: Colors.amber.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 3)),
+                    BoxShadow(
+                      color: Colors.amber.withValues(alpha: 0.15),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
                   ],
                 ),
                 child: Column(
@@ -870,12 +1487,20 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                   children: [
                     Row(
                       children: const [
-                        Icon(Icons.workspace_premium, color: Colors.amber, size: 26),
+                        Icon(
+                          Icons.workspace_premium,
+                          color: Colors.amber,
+                          size: 26,
+                        ),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             '🌟 Anak Asuh Anda (Aktif Didampingi)',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF8B6914)),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: Color(0xFF8B6914),
+                            ),
                           ),
                         ),
                       ],
@@ -883,7 +1508,11 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                     const SizedBox(height: 6),
                     Text(
                       'Alhamdulillah! Anda tercatat sebagai Orang Tua Asuh resmi ananda $alias dengan akumulasi kontribusi ${_formatRupiah(_myTotalDonation)} (${_myDonations.length}x transaksi).',
-                      style: const TextStyle(fontSize: 12, color: Colors.black87, height: 1.3),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.black87,
+                        height: 1.3,
+                      ),
                     ),
                     const SizedBox(height: 10),
                     Row(
@@ -893,16 +1522,23 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                             onPressed: () {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (_) => const FamilyRoomScreen()),
+                                MaterialPageRoute(
+                                  builder: (_) => const FamilyRoomScreen(),
+                                ),
                               );
                             },
                             icon: const Icon(Icons.chat, size: 16),
-                            label: const Text('Ruang Kasih', style: TextStyle(fontSize: 12)),
+                            label: const Text(
+                              'Ruang Kasih',
+                              style: TextStyle(fontSize: 12),
+                            ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 8),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
                             ),
                           ),
                         ),
@@ -912,14 +1548,21 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                             onPressed: () {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (_) => const ScheduleScreen()),
+                                MaterialPageRoute(
+                                  builder: (_) => const ScheduleScreen(),
+                                ),
                               );
                             },
                             icon: const Icon(Icons.videocam, size: 16),
-                            label: const Text('Video Call', style: TextStyle(fontSize: 12)),
+                            label: const Text(
+                              'Video Call',
+                              style: TextStyle(fontSize: 12),
+                            ),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 8),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
                             ),
                           ),
                         ),
@@ -934,10 +1577,11 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-
                   Card(
                     elevation: 1.5,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Column(
@@ -945,27 +1589,51 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                         children: [
                           Row(
                             children: const [
-                              Icon(Icons.badge_outlined, color: AppColors.primary, size: 20),
+                              Icon(
+                                Icons.badge_outlined,
+                                color: AppColors.primary,
+                                size: 20,
+                              ),
                               SizedBox(width: 8),
-                              Text('Data Lengkap & Biodata Anak', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                              Text(
+                                'Data Lengkap & Biodata Anak',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
                             ],
                           ),
                           const Divider(height: 20),
                           if (dream != null)
-                            _buildDataRow(Icons.lightbulb_outline, 'Cita-Cita / Impian', dream),
+                            _buildDataRow(
+                              Icons.lightbulb_outline,
+                              'Cita-Cita / Impian',
+                              dream,
+                            ),
                           if (hobby != null)
-                            _buildDataRow(Icons.sports_soccer_outlined, 'Hobi & Minat', hobby),
-                          _buildDataRow(Icons.location_on_outlined, 'Lokasi Panti', city),
+                            _buildDataRow(
+                              Icons.sports_soccer_outlined,
+                              'Hobi & Minat',
+                              hobby,
+                            ),
+                          _buildDataRow(
+                            Icons.location_on_outlined,
+                            'Lokasi Panti',
+                            city,
+                          ),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
 
-
                   Card(
                     elevation: 1.5,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Column(
@@ -973,15 +1641,30 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                         children: [
                           Row(
                             children: const [
-                              Icon(Icons.auto_stories_outlined, color: AppColors.primary, size: 20),
+                              Icon(
+                                Icons.auto_stories_outlined,
+                                color: AppColors.primary,
+                                size: 20,
+                              ),
                               SizedBox(width: 8),
-                              Text('Cerita Kehidupan & Harapan', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                              Text(
+                                'Cerita Kehidupan & Harapan',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
                             ],
                           ),
                           const Divider(height: 20),
                           Text(
                             child['story_summary'] ?? child['story'] ?? 'Anak yang rajin belajar, penuh semangat dan gemar menghafal doa serta giat membantu teman-temannya di panti asuhan.',
-                            style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textPrimary),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              height: 1.5,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
                         ],
                       ),
@@ -991,7 +1674,9 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
 
                   Card(
                     elevation: 1.5,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Column(
@@ -999,12 +1684,20 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.newspaper_outlined, color: AppColors.primary, size: 20),
+                              const Icon(
+                                Icons.newspaper_outlined,
+                                color: AppColors.primary,
+                                size: 20,
+                              ),
                               const SizedBox(width: 8),
                               const Expanded(
                                 child: Text(
                                   'Jejak Perkembangan Terbaru',
-                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.textPrimary,
+                                  ),
                                 ),
                               ),
                               TextButton(
@@ -1019,7 +1712,10 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                                     ),
                                   );
                                 },
-                                child: const Text('Lihat Semua Kabar', style: TextStyle(fontSize: 12)),
+                                child: const Text(
+                                  'Lihat Semua Kabar',
+                                  style: TextStyle(fontSize: 12),
+                                ),
                               ),
                             ],
                           ),
@@ -1033,29 +1729,44 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                                     builder: (_) => ChildGalleryScreen(
                                       childId: (child['id'] ?? '').toString(),
                                       childAlias: alias,
-                                      isAdmin: Provider.of<AuthProvider>(context, listen: false).isAdmin,
+                                      isAdmin: Provider.of<AuthProvider>(
+                                        context,
+                                        listen: false,
+                                      ).isAdmin,
                                     ),
                                   ),
                                 );
                               },
-                              icon: const Icon(Icons.photo_library_outlined, size: 16),
-                              label: const Text('Lihat Galeri Karya', style: TextStyle(fontSize: 12)),
+                              icon: const Icon(
+                                Icons.photo_library_outlined,
+                                size: 16,
+                              ),
+                              label: const Text(
+                                'Lihat Galeri Karya',
+                                style: TextStyle(fontSize: 12),
+                              ),
                             ),
                           ),
                           const Divider(height: 16),
                           if (_childReports.isEmpty)
                             const Text(
                               'Belum ada kabar perkembangan terbaru untuk anak ini.',
-                              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
                             )
                           else
                             Column(
                               children: _childReports.take(3).map((rep) {
-                                final title = (rep['title'] ?? '').toString().isNotEmpty
+                                final title =
+                                    (rep['title'] ?? '').toString().isNotEmpty
                                     ? rep['title'].toString()
                                     : 'Kabar Terbaru';
-                                final category = (rep['category'] ?? 'Kegiatan').toString();
-                                final summary = (rep['summary'] ?? '').toString();
+                                final category = (rep['category'] ?? 'Kegiatan')
+                                    .toString();
+                                final summary = (rep['summary'] ?? '')
+                                    .toString();
                                 return Container(
                                   margin: const EdgeInsets.only(bottom: 8),
                                   padding: const EdgeInsets.all(10),
@@ -1064,27 +1775,55 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Row(
                                         children: [
                                           Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: AppColors.primary.withValues(alpha: 0.12),
-                                              borderRadius: BorderRadius.circular(6),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
                                             ),
-                                            child: Text(category, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primaryDark)),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.primary
+                                                  .withValues(alpha: 0.12),
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              category,
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                                color: AppColors.primaryDark,
+                                              ),
+                                            ),
                                           ),
                                           const SizedBox(width: 8),
                                           Expanded(
-                                            child: Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                                            child: Text(
+                                              title,
+                                              style: const TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
                                           ),
                                         ],
                                       ),
                                       if (summary.isNotEmpty) ...[
                                         const SizedBox(height: 4),
-                                        Text(summary, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                                        Text(
+                                          summary,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: AppColors.textSecondary,
+                                          ),
+                                        ),
                                       ],
                                     ],
                                   ),
@@ -1099,6 +1838,10 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
 
                   _buildPrayerAndBirthdayCard(child, alias),
                   const SizedBox(height: 16),
+                  if (!isAdmin) ...[
+                    _buildDonationReminderCard(),
+                    const SizedBox(height: 16),
+                  ],
 
                   _buildWishlistCard(child),
                   if (_isSponsoredByMe) ...[
@@ -1109,7 +1852,9 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
 
                   Card(
                     elevation: 1.5,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Column(
@@ -1117,20 +1862,31 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.pie_chart_outline, color: AppColors.primary, size: 20),
+                              const Icon(
+                                Icons.pie_chart_outline,
+                                color: AppColors.primary,
+                                size: 20,
+                              ),
                               const SizedBox(width: 8),
                               const Expanded(
                                 child: Text(
                                   'Target Pemenuhan Kebutuhan',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.textPrimary,
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Flexible(
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: AppColors.surfaceLight,
                                     borderRadius: BorderRadius.circular(8),
@@ -1139,7 +1895,11 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                                     category.toString(),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryDark),
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.primaryDark,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1149,24 +1909,48 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text('Target Dana Kebutuhan:', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-                              Text(_formatRupiah(targetNum), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                              const Text(
+                                'Target Dana Kebutuhan:',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                              Text(
+                                _formatRupiah(targetNum),
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primary,
+                                ),
+                              ),
                             ],
                           ),
                           const SizedBox(height: 8),
                           ClipRRect(
                             borderRadius: BorderRadius.circular(6),
                             child: LinearProgressIndicator(
-                              value: targetNum > 0 ? (_myTotalDonation / targetNum).clamp(0.0, 1.0) : 0.0,
+                              value: targetNum > 0
+                                  ? (_myTotalDonation / targetNum).clamp(
+                                      0.0,
+                                      1.0,
+                                    )
+                                  : 0.0,
                               minHeight: 8,
                               backgroundColor: Colors.grey.shade200,
-                              valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
+                              valueColor: const AlwaysStoppedAnimation<Color>(
+                                Colors.green,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 6),
                           Text(
                             'Terkumpul: ${_formatRupiah(_myTotalDonation)} (${targetNum > 0 ? ((_myTotalDonation / targetNum) * 100).toInt() : 0}%)',
-                            style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade700,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ],
                       ),
@@ -1174,15 +1958,21 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
                   ),
                   const SizedBox(height: 20),
 
-
                   const Text(
                     'Pilih Paket Sponsorship Orang Tua Asuh',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   const Text(
                     'Dukungan Anda disalurkan secara transparan dengan bukti penyaluran resmi panti.',
-                    style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
                   const SizedBox(height: 12),
 
@@ -1196,43 +1986,56 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
 
                       return Card(
                         elevation: isSelected ? 3 : 1,
-                        color: isSelected ? AppColors.surfaceLight : Colors.white,
+                        color: isSelected
+                            ? AppColors.surfaceLight
+                            : Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                           side: BorderSide(
-                            color: isSelected ? AppColors.primary : Colors.grey.shade300,
+                            color: isSelected
+                                ? AppColors.primary
+                                : Colors.grey.shade300,
                             width: isSelected ? 2 : 1,
                           ),
                         ),
                         margin: const EdgeInsets.only(bottom: 12),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
-                          onTap: () => setState(() => _selectedPackageIndex = idx),
+                          onTap: () =>
+                              setState(() => _selectedPackageIndex = idx),
                           child: Padding(
                             padding: const EdgeInsets.all(14.0),
                             child: Row(
                               children: [
                                 Icon(
-                                  isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+                                  isSelected
+                                      ? Icons.radio_button_checked
+                                      : Icons.radio_button_off,
                                   color: AppColors.primary,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         pkg['name'],
                                         style: TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 15,
-                                          color: isSelected ? AppColors.primaryDark : AppColors.textPrimary,
+                                          color: isSelected
+                                              ? AppColors.primaryDark
+                                              : AppColors.textPrimary,
                                         ),
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
                                         pkg['desc'],
-                                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.textSecondary,
+                                        ),
                                       ),
                                       const SizedBox(height: 6),
                                       Text(
@@ -1273,11 +2076,28 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
           const SizedBox(width: 10),
           SizedBox(
             width: 130,
-            child: Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.w500)),
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
-          const Text(': ', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          const Text(
+            ': ',
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
           Expanded(
-            child: Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+            ),
           ),
         ],
       ),
@@ -1293,7 +2113,14 @@ class _ChildDetailScreenState extends State<ChildDetailScreen> {
       } catch (_) {}
     }
     if (url.startsWith('assets/')) {
-      return Image.asset(url, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: Colors.white, child: const Icon(Icons.face, size: 64, color: AppColors.primary)));
+      return Image.asset(
+        url,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => Container(
+          color: Colors.white,
+          child: const Icon(Icons.face, size: 64, color: AppColors.primary),
+        ),
+      );
     }
     if (url.startsWith('http')) {
       return Image.network(

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile/features/auth/auth_provider.dart';
+import 'package:mobile/features/home/home_screen.dart';
 import 'package:mobile/features/profile/profile_screen.dart';
 import 'package:mobile/widgets/main_navigation.dart';
 
@@ -57,39 +58,60 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets('Removed features are absent and Logout is moved to ProfileScreen', (tester) async {
-    final auth = FakeAuthProvider(role: 'donatur');
+  testWidgets(
+    'Removed features are absent and Logout is moved to ProfileScreen',
+    (tester) async {
+      final auth = FakeAuthProvider(role: 'donatur');
 
-    await tester.pumpWidget(
-      ChangeNotifierProvider<AuthProvider>.value(
-        value: auth,
-        child: const MaterialApp(home: MainNavigation()),
-      ),
-    );
-    await tester.pump();
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AuthProvider>.value(
+          value: auth,
+          child: const MaterialApp(home: MainNavigation()),
+        ),
+      );
+      await tester.pump();
 
-    expect(find.text('Saran & Kesan'), findsNothing);
-    expect(find.text('Keluar'), findsNothing);
-    expect(find.text('Verifikasi Sertifikat'), findsNothing);
-    expect(find.text('100% SHA-256'), findsNothing);
-    expect(find.text('Data Offline & Online'), findsNothing);
-    expect(find.text('Kotak Amal IoT'), findsNothing);
-    expect(find.text('IoT Panti'), findsNothing);
+      expect(find.text('Berita Panti'), findsOneWidget);
+      expect(find.byType(PageView), findsOneWidget);
+      expect(find.text('Sponsori Anak'), findsNothing);
+      expect(find.text('Berita Perkembangan Anak'), findsNothing);
+      expect(find.text('Sensor & Game'), findsNothing);
+      expect(find.text('Peta Panti LBS'), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(HomeScreen),
+          matching: find.text('Ruang Kasih'),
+        ),
+        findsNothing,
+      );
 
-    await tester.pumpWidget(
-      ChangeNotifierProvider<AuthProvider>.value(
-        value: auth,
-        child: const MaterialApp(home: ProfileScreen()),
-      ),
-    );
-    await tester.pump();
+      expect(find.text('Saran & Kesan'), findsNothing);
+      expect(find.text('Keluar'), findsNothing);
+      expect(find.text('Verifikasi Sertifikat'), findsNothing);
+      expect(find.text('100% SHA-256'), findsNothing);
+      expect(find.text('Data Offline & Online'), findsNothing);
+      expect(find.text('Kotak Amal IoT'), findsNothing);
+      expect(find.text('IoT Panti'), findsNothing);
 
-    final logoutFinder = find.text('Keluar dari Akun');
-    await tester.scrollUntilVisible(logoutFinder, 200, scrollable: find.byType(Scrollable).first);
-    expect(logoutFinder, findsOneWidget);
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AuthProvider>.value(
+          value: auth,
+          child: const MaterialApp(home: ProfileScreen()),
+        ),
+      );
+      await tester.pump();
 
-    await tester.tap(logoutFinder);
-    await tester.pumpAndSettle();
-    expect(find.text('Konfirmasi Keluar'), findsOneWidget);
-  });
+      final logoutFinder = find.text('Keluar dari Akun');
+      await tester.scrollUntilVisible(
+        logoutFinder,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(logoutFinder, findsOneWidget);
+
+      await tester.tap(logoutFinder);
+      await tester.pumpAndSettle();
+      expect(find.text('Konfirmasi Keluar'), findsOneWidget);
+    },
+  );
 }

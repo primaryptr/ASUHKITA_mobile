@@ -47,7 +47,6 @@ function startListening() {
     console.log(`   [DONATIONS] GET /api/donations/history | POST /api/donations/sync`);
     console.log(`   [LEDGER]    GET /api/ledger | /api/ledger/verify | /api/ledger/block/:index`);
     console.log(`   [LEDGER]    POST /api/ledger/certificates | /api/ledger/report`);
-    console.log(`   [LBS]       GET /api/orphanages | /api/orphanages/nearby`);
     console.log(`   [SCHEDULE]  POST/GET /api/orphanages/schedules`);
     console.log(`   [GAME]      POST /api/game/scores | /api/game/steps`);
     console.log(`   [GAME]      GET  /api/game/leaderboard | /api/game/my-scores | /api/game/steps`);

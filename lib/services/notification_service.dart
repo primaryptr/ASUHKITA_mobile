@@ -35,6 +35,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   debugPrint('[FCM Background] Pesan diterima: ${message.messageId}');
 }
 
+enum DonationReminderFrequency { daily, weekly, monthly }
+
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
@@ -375,30 +377,58 @@ class NotificationService {
     }
   }
 
-  Future<void> scheduleMonthlyDonationReminder({
+  Future<void> scheduleDonationReminder({
+    required int id,
     required String donatorName,
+    required String childAlias,
+    required DateTime scheduledDateTime,
+    required DonationReminderFrequency frequency,
   }) async {
     if (kIsWeb) return;
-    const int notifId = 1001;
+    await initialize();
 
-    final now = DateTime.now();
-    final nextMonth = DateTime(now.year, now.month + 1, 1, 8, 0);
-    final scheduledTz = tz.TZDateTime.from(nextMonth, tz.local);
-    final mode = await _getScheduleMode();
+    if (!scheduledDateTime.isAfter(DateTime.now())) {
+      throw ArgumentError('Waktu pengingat harus berada di masa depan.');
+    }
 
-    await _flutterLocalNotificationsPlugin.zonedSchedule(
-      id: notifId,
-      title: 'Waktunya Donasi Bulanan! ❤️',
-      body:
-          'Halo $donatorName! Donasi bulanan Anda untuk anak asuh belum dilakukan bulan ini.',
-      scheduledDate: scheduledTz,
-      notificationDetails: _notifDetails,
-      androidScheduleMode: mode,
-      matchDateTimeComponents: DateTimeComponents.dayOfMonthAndTime,
-      payload: 'monthly_donation_reminder',
-    );
+    final scheduledTz = tz.TZDateTime.from(scheduledDateTime, tz.local);
+    final DateTimeComponents matchDateTimeComponents;
+    switch (frequency) {
+      case DonationReminderFrequency.daily:
+        matchDateTimeComponents = DateTimeComponents.time;
+      case DonationReminderFrequency.weekly:
+        matchDateTimeComponents = DateTimeComponents.dayOfWeekAndTime;
+      case DonationReminderFrequency.monthly:
+        matchDateTimeComponents = DateTimeComponents.dayOfMonthAndTime;
+    }
+
+    Future<void> schedule(AndroidScheduleMode mode) {
+      return _flutterLocalNotificationsPlugin.zonedSchedule(
+        id: id,
+        title: 'Waktunya Berbagi Kebaikan ❤️',
+        body:
+            'Halo $donatorName, ingat untuk kembali mendukung ananda $childAlias.',
+        scheduledDate: scheduledTz,
+        notificationDetails: _notifDetails,
+        androidScheduleMode: mode,
+        matchDateTimeComponents: matchDateTimeComponents,
+        payload: 'donation_reminder_$id',
+      );
+    }
+
+    try {
+      await schedule(AndroidScheduleMode.exactAllowWhileIdle);
+    } catch (error) {
+      debugPrint(
+        '[NotificationService] Exact donation reminder failed; '
+        'retrying inexact: $error',
+      );
+      await schedule(AndroidScheduleMode.inexactAllowWhileIdle);
+    }
+
     debugPrint(
-      '[NotificationService] Monthly donation reminder scheduled: $scheduledTz',
+      '[NotificationService] Donation reminder scheduled '
+      '($frequency): $scheduledTz',
     );
   }
 

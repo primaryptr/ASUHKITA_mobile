@@ -1,6 +1,5 @@
 
-
-
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -8,14 +7,11 @@ import '../../core/app_colors.dart';
 import '../../core/dio_client.dart';
 import '../../data/local_db.dart';
 import '../auth/auth_provider.dart';
-import '../map/map_screen.dart';
 import '../schedule/schedule_screen.dart';
-import '../steps_game/steps_and_game_screen.dart';
 import '../ai_assistant/ai_assistant_screen.dart';
 import '../admin/admin_panel_screen.dart';
 import '../admin/donation_tracking_screen.dart';
 import '../admin/finance_dashboard_screen.dart';
-import '../communication/family_room_screen.dart';
 import '../reports/progress_feed_screen.dart';
 import '../sponsor/child_detail_screen.dart';
 
@@ -35,17 +31,52 @@ class _HomeScreenState extends State<HomeScreen> {
   int _totalPlatformChildren = 0;
   int _totalPlatformDonors = 0;
   int _totalAdminFunds = 0;
+  final PageController _pantiNewsController = PageController();
+  Timer? _pantiNewsTimer;
+  int _currentPantiNewsPage = 0;
+
+  static const List<_PantiNewsItem> _pantiNews = [
+    _PantiNewsItem(
+      title: 'Belajar Bersama',
+      caption: 'Anak-anak saling mendukung meraih cita-cita.',
+      icon: Icons.menu_book_outlined,
+      colors: [Color(0xFF2E7D5B), Color(0xFF80B89A)],
+    ),
+    _PantiNewsItem(
+      title: 'Kreasi Penuh Warna',
+      caption: 'Waktu berkarya untuk menumbuhkan kreativitas.',
+      icon: Icons.palette_outlined,
+      colors: [Color(0xFF347C70), Color(0xFF8FC4A5)],
+    ),
+    _PantiNewsItem(
+      title: 'Bermain dan Bertumbuh',
+      caption: 'Kebersamaan membuat hari-hari semakin ceria.',
+      icon: Icons.sports_soccer_outlined,
+      colors: [Color(0xFF3C7954), Color(0xFF9AC99B)],
+    ),
+  ];
 
   @override
   void initState() {
     super.initState();
     HomeScreen.refreshNotifier.addListener(_loadData);
+    _pantiNewsTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || !_pantiNewsController.hasClients) return;
+      final nextPage = (_currentPantiNewsPage + 1) % _pantiNews.length;
+      _pantiNewsController.animateToPage(
+        nextPage,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeInOut,
+      );
+    });
     _loadData();
   }
 
   @override
   void dispose() {
     HomeScreen.refreshNotifier.removeListener(_loadData);
+    _pantiNewsTimer?.cancel();
+    _pantiNewsController.dispose();
     super.dispose();
   }
 
@@ -284,6 +315,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
+            const SizedBox(height: 12),
+            _buildPantiNewsCard(isAdmin),
             const SizedBox(height: 20),
 
 
@@ -375,14 +408,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   _buildFeatureCard(
                     context,
-                    title: 'Ruang Kasih',
-                    subtitle: 'Chat, karya & video call',
-                    icon: Icons.favorite,
-                    color: AppColors.secondary,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FamilyRoomScreen())),
-                  ),
-                  _buildFeatureCard(
-                    context,
                     title: 'Sahabat Asuh AI',
                     subtitle: 'Bantuan laporan & data',
                     icon: Icons.auto_awesome,
@@ -432,61 +457,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   _buildFeatureCard(
                     context,
-                    title: 'Sponsori Anak',
-                    subtitle: 'Cari & filter paket anak',
-                    icon: Icons.volunteer_activism,
-                    color: AppColors.primary,
-                    onTap: () {
-                      if (widget.onNavigateTab != null) {
-                        widget.onNavigateTab!(1);
-                      }
-                    },
-                  ),
-                  _buildFeatureCard(
-                    context,
-                    title: 'Ruang Kasih',
-                    subtitle: 'Chat & video call',
-                    icon: Icons.favorite,
-                    color: AppColors.secondary,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FamilyRoomScreen())),
-                  ),
-                  _buildFeatureCard(
-                    context,
-                    title: 'Berita Perkembangan Anak',
-                    subtitle: 'Prestasi, karya & aktivitas',
-                    icon: Icons.newspaper,
-                    color: AppColors.primaryDark,
-                    onTap: () {
-                      if (widget.onNavigateTab != null) {
-                        widget.onNavigateTab!(2);
-                      } else {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const ProgressFeedScreen()));
-                      }
-                    },
-                  ),
-                  _buildFeatureCard(
-                    context,
-                    title: 'Peta Panti LBS',
-                    subtitle: 'Jarak & check-in 100m',
-                    icon: Icons.map,
-                    color: AppColors.accent3,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MapScreen())),
-                  ),
-                  _buildFeatureCard(
-                    context,
                     title: 'Jadwal 4 Zona',
                     subtitle: 'WIB, WITA, WIT, London',
                     icon: Icons.schedule,
                     color: AppColors.accent1,
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ScheduleScreen())),
-                  ),
-                  _buildFeatureCard(
-                    context,
-                    title: 'Sensor & Game',
-                    subtitle: 'Langkah & Gyroscope',
-                    icon: Icons.sports_esports,
-                    color: AppColors.accent2,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StepsAndGameScreen())),
                   ),
                   _buildFeatureCard(
                     context,
@@ -723,6 +698,164 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildPantiNewsCard(bool isAdmin) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: isAdmin ? AppColors.adminGradient : AppColors.donaturGradient,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.newspaper_outlined, color: Colors.white, size: 20),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Berita Panti',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Text(
+                'KEGIATAN',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 172,
+            child: PageView.builder(
+              controller: _pantiNewsController,
+              itemCount: _pantiNews.length,
+              onPageChanged: (page) {
+                setState(() => _currentPantiNewsPage = page);
+              },
+              itemBuilder: (context, index) {
+                final item = _pantiNews[index];
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: item.colors,
+                      ),
+                    ),
+                    child: Stack(
+                      children: [
+                        Positioned(
+                          right: -24,
+                          top: -34,
+                          child: Container(
+                            width: 150,
+                            height: 150,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white.withValues(alpha: 0.12),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 24,
+                          top: 24,
+                          child: Icon(
+                            item.icon,
+                            size: 86,
+                            color: Colors.white.withValues(alpha: 0.78),
+                          ),
+                        ),
+                        Positioned(
+                          left: 16,
+                          right: 16,
+                          bottom: 14,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black26,
+                                      blurRadius: 5,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                item.caption,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  height: 1.3,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black26,
+                                      blurRadius: 4,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(_pantiNews.length, (index) {
+              final isCurrent = index == _currentPantiNewsPage;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                width: isCurrent ? 18 : 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: isCurrent ? Colors.white : Colors.white54,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFeatureCard(
     BuildContext context, {
     required String title,
@@ -772,4 +905,18 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+class _PantiNewsItem {
+  const _PantiNewsItem({
+    required this.title,
+    required this.caption,
+    required this.icon,
+    required this.colors,
+  });
+
+  final String title;
+  final String caption;
+  final IconData icon;
+  final List<Color> colors;
 }
