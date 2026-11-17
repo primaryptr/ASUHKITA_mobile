@@ -18,7 +18,6 @@ import '../admin/finance_dashboard_screen.dart';
 import '../communication/family_room_screen.dart';
 import '../reports/progress_feed_screen.dart';
 import '../sponsor/child_detail_screen.dart';
-import 'iot_donation_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final Function(int)? onNavigateTab;
@@ -323,7 +322,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     },
                   ),
                   const SizedBox(width: 10),
-                  _buildMetricCard('IoT Panti', 'Aktif', Icons.sensors, AppColors.accent2),
+                  _buildMetricCard(
+                    'Anak Panti',
+                    '$_totalPlatformChildren Anak',
+                    Icons.groups,
+                    AppColors.accent2,
+                    onTap: () => widget.onNavigateTab?.call(1),
+                  ),
                 ],
               ),
             const SizedBox(height: 24),
@@ -490,14 +495,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     icon: Icons.auto_awesome,
                     color: AppColors.accent3,
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AiAssistantScreen())),
-                  ),
-                  _buildFeatureCard(
-                    context,
-                    title: 'Kotak Amal IoT',
-                    subtitle: 'Deteksi sensor koin/uang',
-                    icon: Icons.savings,
-                    color: AppColors.secondary,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const IotDonationScreen())),
                   ),
                   _buildFeatureCard(
                     context,

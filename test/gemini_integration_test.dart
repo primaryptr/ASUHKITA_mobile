@@ -62,6 +62,37 @@ void main() {
     });
   });
 
+  group('polishReportStory (Fallback Mode)', () {
+    test('merapikan kalimat narasi tanpa menambah judul Ringkasan atau bullet', () async {
+      final polished = await gemini.polishReportStory(
+        childName: 'Bintang',
+        category: 'Prestasi',
+        rawStory: 'hari ini bintang menang lomba mewarnai dia sangat gembira',
+      );
+      expect(polished.isNotEmpty, isTrue);
+      expect(polished.contains('Ringkasan Perkembangan Anak'), isFalse);
+      expect(polished.contains('•'), isFalse);
+      expect(polished.startsWith('Hari ini'), isTrue);
+      expect(polished.endsWith('.'), isTrue);
+    });
+
+    test('membersihkan awalan bullet dan header ringkasan jika ada', () async {
+      final polished = await gemini.polishReportStory(
+        childName: 'Awan',
+        category: 'Kegiatan',
+        rawStory: 'Ringkasan Perkembangan Anak:\n• awan belajar matematika bersama teman',
+      );
+      expect(polished.contains('Ringkasan Perkembangan Anak'), isFalse);
+      expect(polished.contains('•'), isFalse);
+      expect(polished, equals('Awan belajar matematika bersama teman.'));
+    });
+
+    test('FAQ tidak lagi mempromosikan Kotak Amal IoT', () async {
+      final faq = await gemini.askFaq('Apa itu AsuhKita?');
+      expect(faq.toLowerCase().contains('kotak amal'), isFalse);
+    });
+  });
+
   group('FR-51 | GeminiService.askFaq (Fallback Mode)', () {
     test('Mengembalikan jawaban tidak kosong', () async {
       final result = await gemini.askFaq('Bagaimana cara berdonasi?');

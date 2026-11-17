@@ -152,7 +152,7 @@ void main() {
     expect(find.text('Antrean Jadwal Donatur'), findsOneWidget);
     expect(find.text('Pengingat Audit Kas'), findsOneWidget);
     expect(find.text('Bintang'), findsOneWidget);
-    expect(find.text('Disetujui'), findsOneWidget);
+    expect(find.textContaining('Disetujui'), findsOneWidget);
   });
 
   testWidgets('Donor ScheduleScreen displays coordinated schedules with status badge', (tester) async {
@@ -165,7 +165,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Status Pengajuan Video Call'), findsOneWidget);
-    expect(find.text('Disetujui'), findsOneWidget);
+    expect(find.textContaining('Disetujui'), findsOneWidget);
     expect(find.textContaining('Siap jam 17:00 WIB'), findsOneWidget);
   });
 

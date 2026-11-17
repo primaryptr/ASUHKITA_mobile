@@ -44,25 +44,29 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: (db, version) async {
         await _createTables(db);
+        await _runAlterMigrations(db);
         await _seedDefaultAuthUsers(db);
         await clearDummyChildren(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         await _createTables(db);
+        await _runAlterMigrations(db);
         await _seedDefaultAuthUsers(db);
         await clearDummyChildren(db);
+      },
+      onOpen: (db) async {
+        await _runAlterMigrations(db);
       },
     );
     await clearDummyChildren(db);
     return db;
   }
 
-  Future<void> _createTables(Database db) async {
-    // Migration checks for existing installations
-    final migrations = [
+  Future<void> _runAlterMigrations(Database db) async {
+    const migrations = [
       'ALTER TABLE cached_donations ADD COLUMN donor_name TEXT',
       'ALTER TABLE cached_donations ADD COLUMN need_category TEXT',
       'ALTER TABLE cached_donations ADD COLUMN donor_email TEXT',
@@ -80,14 +84,21 @@ class LocalDatabase {
       'ALTER TABLE new_children ADD COLUMN category_budgets TEXT',
       'ALTER TABLE new_children ADD COLUMN daily_status TEXT',
       'ALTER TABLE new_children ADD COLUMN birth_date TEXT',
-      // PBI 1: status harian dari kabar anak
       'ALTER TABLE cached_progress_reports ADD COLUMN daily_status TEXT',
+      'ALTER TABLE offline_donations_queue ADD COLUMN local_id TEXT',
+      'ALTER TABLE offline_donations_queue ADD COLUMN package_name TEXT',
+      'ALTER TABLE offline_donations_queue ADD COLUMN donor_name TEXT',
+      'ALTER TABLE offline_donations_queue ADD COLUMN donor_email TEXT',
+      'ALTER TABLE offline_donations_queue ADD COLUMN notes TEXT',
     ];
     for (final sql in migrations) {
       try {
         await db.execute(sql);
       } catch (_) {}
     }
+  }
+
+  Future<void> _createTables(Database db) async {
 
     await db.execute('''
       CREATE TABLE IF NOT EXISTS auth_users (
@@ -307,6 +318,7 @@ class LocalDatabase {
         summary TEXT,
         evidence_url TEXT,
         author_name TEXT,
+        daily_status TEXT,
         created_at TEXT
       )
     ''');

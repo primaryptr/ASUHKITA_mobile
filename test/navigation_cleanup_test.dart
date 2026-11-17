@@ -73,6 +73,8 @@ void main() {
     expect(find.text('Verifikasi Sertifikat'), findsNothing);
     expect(find.text('100% SHA-256'), findsNothing);
     expect(find.text('Data Offline & Online'), findsNothing);
+    expect(find.text('Kotak Amal IoT'), findsNothing);
+    expect(find.text('IoT Panti'), findsNothing);
 
     await tester.pumpWidget(
       ChangeNotifierProvider<AuthProvider>.value(

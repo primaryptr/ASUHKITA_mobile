@@ -33,7 +33,7 @@ class GeminiService {
         'TUGAS UTAMA: Menjawab pertanyaan donatur dan pengurus panti asuhan seputar:\n'
         '1. Anak asuh, profil anak, dan kebutuhan prioritas (Pendidikan, Kesehatan, Nutrisi, Kebutuhan Harian, Perawatan Esensial).\n'
         '2. Cara sponsorship, paket donasi, konversi valuta mata uang asing, dan jadwal kegiatan panti 4 zona waktu.\n'
-        '3. Sistem transparansi blockchain ledger, bukti nota belanja, dan kotak amal pintar IoT.\n'
+        '3. Sistem transparansi penyaluran dana, bukti nota belanja, dan kabar perkembangan anak.\n'
         '4. Fitur mobile seperti donasi langkah pedometer, mini game gyroscope, dan ruang komunikasi anak asuh.\n\n'
         'ATURAN KETAT KONTEKS:\n'
         'Jika pengguna menanyakan hal yang BERADA DI LUAR TOPIK AsuhKita (misalnya politik umum, gosip selebriti, resep makanan umum, koding di luar AsuhKita, tugas kuliah umum, rekomendasi film/musik, atau topik dunia lain), kamu HARUS menolak dengan tegas namun sopan menggunakan pesan peringatan:\n'
@@ -98,6 +98,73 @@ class GeminiService {
       }
     }
     return _generateDynamicSummary(rawText);
+  }
+
+  /// Polishes ONLY the narrative story content of a child progress report
+  /// into warm, cohesive Indonesian prose without adding a title or bullet list.
+  Future<String> polishReportStory({
+    required String childName,
+    String category = 'Kegiatan',
+    required String rawStory,
+  }) async {
+    final trimmed = rawStory.trim();
+    if (trimmed.isEmpty) return '';
+
+    final model = _gemini;
+    if (model != null) {
+      try {
+        final prompt =
+            'Rapikan kalimat cerita perkembangan anak asuh bernama "$childName" '
+            '(kategori: $category) berikut ke dalam Bahasa Indonesia yang hangat, santun, jelas, '
+            'dan nyaman dibaca orang tua asuh.\n'
+            'ATURAN KETAT:\n'
+            '- Kembalikan HANYA isi paragraf ceritanya saja (1-2 paragraf singkat).\n'
+            '- JANGAN tambahkan judul, label pembuka seperti "Ringkasan:", kategori, atau status.\n'
+            '- JANGAN ubah menjadi daftar bullet atau poin bernomor.\n'
+            '- Pertahankan seluruh fakta utama dari teks asli.\n\n'
+            'Teks asli:\n"$trimmed"';
+        final response = await model.generateContent([Content.text(prompt)]);
+        final text = _stripSummaryArtifacts(response.text?.trim() ?? '');
+        if (text.isNotEmpty) return text;
+      } catch (e) {
+        debugPrint('Gemini Polish Story API error: $e');
+      }
+    }
+    return _polishStoryParagraph(trimmed, childName: childName);
+  }
+
+  String _stripSummaryArtifacts(String text) {
+    final cleanedLines = text
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .where((l) => !RegExp(r'^(#+\s*|ringkasan\b.*:?\s*$)', caseSensitive: false).hasMatch(l))
+        .map((l) => l.replaceFirst(RegExp(r'^[\-\*\•]+\s*'), '').trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+    return cleanedLines.join(' ').trim();
+  }
+
+  String _polishStoryParagraph(String rawStory, {required String childName}) {
+    final cleaned = _stripSummaryArtifacts(rawStory);
+    if (cleaned.isEmpty) return rawStory.trim();
+
+    final normalizedSpaces = cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final sentences = normalizedSpaces
+        .split(RegExp(r'(?<=[.!?])\s+'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    final formatted = <String>[];
+    for (var s in sentences) {
+      if (s.isEmpty) continue;
+      final firstUpper = s[0].toUpperCase() + (s.length > 1 ? s.substring(1) : '');
+      final hasEndPunctuation = firstUpper.endsWith('.') || firstUpper.endsWith('!') || firstUpper.endsWith('?');
+      formatted.add(hasEndPunctuation ? firstUpper : '$firstUpper.');
+    }
+    if (formatted.isEmpty) return normalizedSpaces;
+    return formatted.join(' ');
   }
 
   String _generateDynamicSummary(String rawText) {
@@ -207,8 +274,7 @@ class GeminiService {
     final inContextKeywords = [
       'asuh', 'anak', 'panti', 'donasi', 'sponsor', 'yatim', 'dhuafa', 'bantu', 'sedekah',
       'ledger', 'blockchain', 'transparansi', 'sha', 'hash', 'verifikasi', 'kredensial', 'sertifikat',
-      'iot', 'kotak amal', 'esp32', 'sensor', 'uang', 'koin', 'pecahan',
-      'langkah', 'pedometer', 'accelerometer', 'gyro', 'game', 'bintang',
+      'sensor', 'langkah', 'pedometer', 'accelerometer', 'gyro', 'game', 'bintang',
       'poin', 'kebaikan', 'badge', 'ranking', 'peringkat', 'reward',
       'lbs', 'peta', 'lokasi', 'gps', 'rute', 'jarak', 'radius', 'check in', 'kunjungan',
       'kurs', 'mata uang', 'valuta', 'usd', 'idr', 'sgd', 'eur', 'sar', 'rupiah', 'dollar',
@@ -230,7 +296,7 @@ class GeminiService {
       return '⚠️ **Peringatan Di Luar Konteks AsuhKita**\n\n'
           'Maaf, pertanyaan Anda berada di luar topik dan lingkup aplikasi AsuhKita. '
           'Saya adalah **Sahabat Asuh AI** yang dirancang khusus untuk mendampingi program donasi, '
-          'pengasuhan anak panti, sistem transparansi blockchain, IoT kotak amal, dan panduan fitur AsuhKita.\n\n'
+          'pengasuhan anak panti, transparansi nota belanja, dan panduan fitur AsuhKita.\n\n'
           '💡 *Contoh pertanyaan yang dapat Anda ajukan:*\n'
           '• "Apakah ada anak asuh yang membutuhkan perlengkapan sekolah atau sepatu?"\n'
           '• "Bagaimana cara kerja jadwal audit 4 zona waktu (WIB, WITA, WIT, London)?"\n'
@@ -250,14 +316,14 @@ class GeminiService {
 
     if (q.contains('halo') || q.contains('hai') || q.contains('pagi') || q.contains('siang') || q.contains('sore') || q.contains('malam') || q.contains('assalam')) {
       return 'Halo! Senang sekali bisa menyapamu 😊 Saya **Sahabat Asuh AI**, asisten resmi platform AsuhKita.\n\n'
-          'Saya siap membantumu seputar profil 20 anak asuh, cara sponsorship, jadwal video call & audit 4 zona waktu, transparansi nota belanja blockchain, peta panti LBS, hingga kotak amal pintar IoT. Apa yang ingin kamu ketahui hari ini?';
+          'Saya siap membantumu seputar profil $totalChildren anak asuh, cara sponsorship, jadwal video call & audit 4 zona waktu, transparansi nota belanja, peta panti LBS, hingga donasi langkah & game gyroscope. Apa yang ingin kamu ketahui hari ini?';
     }
     if (q.contains('siapa kamu') || q.contains('kamu siapa') || q.contains('nama kamu') || q.contains('tentang kamu') || q.contains('bisa apa')) {
       return 'Saya adalah **Sahabat Asuh AI**, asisten cerdas yang terintegrasi langsung di aplikasi AsuhKita. Tugas saya meliputi:\n'
           '1. **Informasi Anak Asuh**: Memberikan rekomendasi anak asuh berdasarkan kebutuhan prioritas (Pendidikan, Nutrisi, Kesehatan, Harian).\n'
           '2. **Panduan Sponsorship & Donasi**: Menjelaskan paket bantuan, pembayaran, dan konversi 5 mata uang asing.\n'
           '3. **Asisten Kepenulisan**: Membantu menyusun draf surat hangat untuk anak asuh (Tab "Tulis Surat") dan meringkas laporan perkembangan (Tab "Ringkas Laporan").\n'
-          '4. **Transparansi Blockchain & Sensor IoT**: Menjelaskan audit nota belanja, validasi sertifikat, sensor pedometer, dan kotak amal IoT.';
+          '4. **Transparansi & Aktivitas Donatur**: Menjelaskan bukti penyaluran dana, jadwal video call, sensor pedometer, dan mini game gyroscope.';
     }
 
 
@@ -336,15 +402,6 @@ class GeminiService {
           '• **Hash Chaining**: Setiap transaksi baru mengunci hash blok sebelumnya dengan algoritma SHA-256. Jika data diubah 1 huruf saja, seluruh rantai akan terputus.\n'
           '• **Sertifikat Digital Donatur**: Setiap kali berdonasi, Anda mendapatkan sertifikat resmi ber-QR code dan ID Kredensial unik.\n'
           '• **Uji Deteksi Sertifikat Palsu / Rekayasa**: Di menu **Blockchain Ledger**, terdapat tombol preset cepat **"🚨 Sertifikat Rekayasa/Palsu (Demo Dosen)"** yang membuktikan bahwa sertifikat manipulasi pihak ketiga akan langsung DITOLAK oleh konsensus blockchain.';
-    }
-
-
-    if (q.contains('kotak amal') || q.contains('iot') || q.contains('esp32') || q.contains('koin') || q.contains('hardware')) {
-      return '📦 **Kotak Amal Pintar IoT ESP32 AsuhKita**\n\n'
-          'Inovasi IoT untuk kotak amal fisik di panti asuhan:\n'
-          '• **Hardware ESP32**: Dilengkapi sensor optik inframerah dan tombol pecahan uang (Rp 1.000 s/d Rp 100.000).\n'
-          '• **Otentikasi Kriptografis HMAC-SHA256**: Setiap uang yang masuk ditandatangani oleh hardware key sebelum dikirimkan ke server.\n'
-          '• **Real-Time Sync**: Dana langsung tercatat di kas saldo panti dan tersinkronisasi ke Blockchain Ledger secara otomatis.';
     }
 
 

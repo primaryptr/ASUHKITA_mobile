@@ -265,4 +265,138 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Total Terdaftar: 8 Anak'), findsOneWidget);
   });
+
+  testWidgets('Bagikan Kabar Anak preserves 4 fields after AI polish and publishes cleanly without crash', (tester) async {
+    DioClient().dio.httpClientAdapter = _ChildrenApiAdapter();
+    LocalDatabase.setDatabaseForTest(null);
+    LocalDatabase.forceWebStoreForTest = true;
+    LocalDatabase.resetWebStoreForTest();
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthProvider>.value(
+        value: _FakeAuth(role: 'admin_panti'),
+        child: const MaterialApp(home: AdminPanelScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Anak 1').first);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'No overflow opening child detail bottom sheet');
+
+    final shareBtn = find.text('Bagikan Kabar Anak');
+    await tester.scrollUntilVisible(shareBtn, 300, scrollable: find.byType(Scrollable).last);
+    await tester.tap(shareBtn);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'No overflow opening Bagikan Kabar dialog');
+
+    expect(find.text('Bagikan Kabar Anak 1'), findsOneWidget);
+    expect(find.text('Kategori Kabar'), findsOneWidget);
+    expect(find.text('📢 Status Harian (1 baris singkat)'), findsOneWidget);
+    expect(find.text('Judul Kabar'), findsOneWidget);
+    expect(find.text('Cerita Perkembangan'), findsOneWidget);
+
+    await tester.enterText(
+      find.widgetWithText(TextField, '📢 Status Harian (1 baris singkat)'),
+      'Hari ini menang lomba mewarnai!',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Judul Kabar'),
+      'Juara 1 Mewarnai',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Cerita Perkembangan'),
+      'anak sangat antusias mengikuti lomba tingkat kabupaten hari ini',
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Rapikan Kalimat dengan AI'));
+    await tester.pumpAndSettle();
+
+    // All 4 fields remain intact; only Cerita Perkembangan is polished cleanly.
+    expect(find.text('Kategori Kabar'), findsOneWidget);
+    expect(find.text('Prestasi'), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.widgetWithText(TextField, '📢 Status Harian (1 baris singkat)')).controller?.text,
+      equals('Hari ini menang lomba mewarnai!'),
+    );
+    expect(
+      tester.widget<TextField>(find.widgetWithText(TextField, 'Judul Kabar')).controller?.text,
+      equals('Juara 1 Mewarnai'),
+    );
+    final polishedStory = tester
+        .widget<TextField>(find.widgetWithText(TextField, 'Cerita Perkembangan'))
+        .controller
+        ?.text ?? '';
+    expect(polishedStory.contains('Ringkasan Perkembangan Anak'), isFalse);
+    expect(polishedStory.contains('•'), isFalse);
+    expect(polishedStory.startsWith('Anak sangat antusias'), isTrue);
+
+    await tester.tap(find.text('Publikasikan'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Bagikan Kabar Anak 1'), findsNothing);
+    expect(find.text('✅ Kabar Anak 1 berhasil dipublikasikan!'), findsOneWidget);
+
+    final reports = await LocalDatabase().getCachedProgressReports(childAlias: 'Anak 1');
+    expect(reports.length, 1);
+    expect(reports.first['title'], 'Juara 1 Mewarnai');
+    expect(reports.first['daily_status'], 'Hari ini menang lomba mewarnai!');
+  });
+
+  testWidgets('Broadcast Kabar ke Donatur opens, cancels, and sends cleanly from HomeScreen and AdminPanelScreen', (tester) async {
+    DioClient().dio.httpClientAdapter = _ChildrenApiAdapter();
+    LocalDatabase.setDatabaseForTest(null);
+    LocalDatabase.forceWebStoreForTest = true;
+    LocalDatabase.resetWebStoreForTest();
+
+    // 1. From HomeScreen Admin
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthProvider>.value(
+        value: _FakeAuth(role: 'admin_panti'),
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final homeCard = find.text('Broadcast Kabar ke Donatur');
+    await tester.scrollUntilVisible(homeCard, 300, scrollable: find.byType(Scrollable).first);
+    await tester.tap(homeCard);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Judul Notifikasi'), findsOneWidget);
+    await tester.tap(find.text('Batal'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Judul Notifikasi'), findsNothing);
+
+    // 2. From AdminPanelScreen AppBar icon
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthProvider>.value(
+        value: _FakeAuth(role: 'admin_panti'),
+        child: const MaterialApp(home: AdminPanelScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Broadcast Kabar ke Donatur'));
+    await tester.pumpAndSettle();
+
+    // Empty submit validates inline without crashing
+    await tester.tap(find.text('Kirim Broadcast'));
+    await tester.pump();
+    expect(find.textContaining('wajib diisi'), findsOneWidget);
+
+    await tester.enterText(find.widgetWithText(TextField, 'Judul Notifikasi'), 'Info Panti Terbaru');
+    await tester.enterText(find.widgetWithText(TextField, 'Isi Pesan Broadcast'), 'Terima kasih donatur.');
+    await tester.pump();
+
+    await tester.tap(find.text('Kirim Broadcast'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Judul Notifikasi'), findsNothing);
+    expect(find.text('📡 Broadcast tercatat, akan dikirim saat terhubung.'), findsOneWidget);
+  });
 }

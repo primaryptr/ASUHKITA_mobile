@@ -207,4 +207,38 @@ void main() {
 
     expect(find.text('150000'), findsOneWidget);
   });
+
+  testWidgets('DonationFormScreen prefills nominal otomatis sesuai pilihan paket sponsor', (tester) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthProvider>.value(
+        value: _FakeAuth(),
+        child: const MaterialApp(
+          home: ChildDetailScreen(
+            childData: {
+              'id': 'ch-001',
+              'alias': 'Bintang',
+              'age': 10,
+              'need_category': 'Pendidikan',
+              'target': 500000,
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final komprehensifCard = find.text('Paket Asuh Komprehensif');
+    await tester.scrollUntilVisible(komprehensifCard, 300, scrollable: find.byType(Scrollable).first);
+    await tester.tap(komprehensifCard);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Lanjut ke Form Donasi & Sertifikat'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Form Donasi & Kurs'), findsOneWidget);
+    final amountField = find.widgetWithText(TextField, 'Nominal (IDR) *');
+    final tf = tester.widget<TextField>(amountField);
+    expect(tf.controller?.text, equals('400000'));
+    expect(find.text('Rp 400.000'), findsOneWidget);
+  });
 }

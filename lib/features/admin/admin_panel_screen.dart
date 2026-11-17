@@ -1251,176 +1251,33 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     }
   }
 
-  void _showPublishReportModal(Map<String, dynamic> child) {
+  Future<void> _showPublishReportModal(Map<String, dynamic> child) async {
     final childId = (child['id'] ?? '').toString();
     final childName = (child['alias'] ?? child['name'] ?? 'Anak Asuh').toString();
-    final titleCtrl = TextEditingController();
-    final summaryCtrl = TextEditingController();
-    final statusCtrl = TextEditingController(); // PBI 1: status harian 1 baris
-    String selectedCategory = 'Prestasi';
-    String evidenceUrl = '';
-    bool isPolishing = false;
-    bool isSaving = false;
+    final messenger = ScaffoldMessenger.maybeOf(context);
 
-    showDialog(
+    final published = await showDialog<bool>(
       context: context,
-      builder: (dCtx) => StatefulBuilder(
-        builder: (dCtx, setModalState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-          title: Text('Bagikan Kabar $childName', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: selectedCategory,
-                  decoration: const InputDecoration(labelText: 'Kategori Kabar', border: OutlineInputBorder()),
-                  items: const ['Prestasi', 'Karya Anak', 'Kesehatan', 'Kegiatan']
-                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                      .toList(),
-                  onChanged: (val) => setModalState(() => selectedCategory = val ?? 'Prestasi'),
-                ),
-                const SizedBox(height: 10),
-                // PBI 1: Field Status Harian 1 Baris
-                TextField(
-                  controller: statusCtrl,
-                  maxLength: 80,
-                  decoration: InputDecoration(
-                    labelText: '📢 Status Harian (1 baris singkat)',
-                    hintText: 'Contoh: Hari ini Ani belajar mengaji dengan semangat 🌟',
-                    border: const OutlineInputBorder(),
-                    helperText: 'Muncul sebagai status terbaru di halaman donatur',
-                    helperStyle: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: titleCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Judul Kabar',
-                    hintText: 'Contoh: Juara Lomba Mewarnai',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: summaryCtrl,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Cerita Perkembangan',
-                    hintText: 'Ceritakan momen baik anak hari ini...',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: isPolishing
-                      ? null
-                      : () async {
-                          final raw = summaryCtrl.text.trim();
-                          if (raw.isEmpty) return;
-                          setModalState(() => isPolishing = true);
-                          final polished = await GeminiService().summarizeReport('$childName: $raw');
-                          if (dCtx.mounted) {
-                            setModalState(() {
-                              summaryCtrl.text = polished;
-                              isPolishing = false;
-                            });
-                          }
-                        },
-                  icon: const Icon(Icons.auto_awesome, size: 16),
-                  label: Text(isPolishing ? 'Merapikan...' : 'Rapikan Kalimat dengan AI', style: const TextStyle(fontSize: 12)),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    final picked = await _picker.pickImage(
-                      source: ImageSource.gallery,
-                      maxWidth: 800,
-                      imageQuality: 65,
-                    );
-                    if (picked != null) {
-                      final bytes = await picked.readAsBytes();
-                      setModalState(() {
-                        evidenceUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
-                      });
-                    }
-                  },
-                  icon: const Icon(Icons.photo_camera_outlined, size: 16),
-                  label: Text(evidenceUrl.isEmpty ? 'Lampirkan Foto / Karya (Opsional)' : 'Foto Terlampir ✓', style: const TextStyle(fontSize: 12)),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
-            ElevatedButton(
-              onPressed: isSaving
-                  ? null
-                  : () async {
-                      if (titleCtrl.text.trim().isEmpty && summaryCtrl.text.trim().isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Judul atau cerita perkembangan wajib diisi.')),
-                        );
-                        return;
-                      }
-                      setModalState(() => isSaving = true);
-                      // FIX 1: try-finally agar dialog SELALU pop meskipun ada error
-                      try {
-                        final payload = {
-                          'id': 'rep_${DateTime.now().millisecondsSinceEpoch}',
-                          'child_id': childId,
-                          'child_alias': childName,
-                          'title': titleCtrl.text.trim(),
-                          'category': selectedCategory,
-                          'period': DateTime.now().toIso8601String().substring(0, 7),
-                          'summary': summaryCtrl.text.trim(),
-                          'evidence_url': evidenceUrl,
-                          'author_name': 'Pengurus Panti',
-                          'created_at': DateTime.now().toIso8601String(),
-                          'daily_status': statusCtrl.text.trim(),
-                        };
-                        // API call dengan timeout 8 detik — tidak block jika offline
-                        try {
-                          await DioClient().dio.post('/reports', data: payload)
-                              .timeout(const Duration(seconds: 8));
-                        } catch (_) {}
-                        // Simpan ke local DB
-                        await _localDb.cacheProgressReports([payload]);
-                        HomeScreen.refreshNotifier.value++;
-                      } catch (_) {}
-                      // finally: selalu dispose & pop
-                      try { titleCtrl.dispose(); } catch (_) {}
-                      try { summaryCtrl.dispose(); } catch (_) {}
-                      try { statusCtrl.dispose(); } catch (_) {}
-                      if (dCtx.mounted) Navigator.pop(dCtx);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('✅ Kabar $childName berhasil dipublikasikan!'),
-                            backgroundColor: AppColors.primary,
-                          ),
-                        );
-                      }
-                    },
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-              child: isSaving
-                  ? const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(width: 14, height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-                        SizedBox(width: 8),
-                        Text('Mempublikasikan...'),
-                      ],
-                    )
-                  : const Text('Publikasikan'),
-            ),
-          ],
-        ),
+      barrierDismissible: false,
+      builder: (_) => _PublishReportDialog(
+        childId: childId,
+        childName: childName,
+        picker: _picker,
+        localDb: _localDb,
       ),
     );
+
+    if (published == true && mounted) {
+      HomeScreen.refreshNotifier.value++;
+      if (messenger != null && messenger.mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('✅ Kabar $childName berhasil dipublikasikan!'),
+            backgroundColor: AppColors.primary,
+          ),
+        );
+      }
+    }
   }
 
   void _showChildDetailAndReceiptDialog(Map<String, dynamic> child) {
@@ -1532,19 +1389,26 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text(
-                                  'Status Pendanaan Anak',
-                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.2),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
+                                const Expanded(
                                   child: Text(
-                                    '👥 $donorCount Donatur Mendampingi',
-                                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                    'Status Pendanaan Anak',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Flexible(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text(
+                                      '👥 $donorCount Donatur Mendampingi',
+                                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -2261,14 +2125,16 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                         } catch (_) {}
                       }
                       HomeScreen.refreshNotifier.value++;
-                      noteCtrl.dispose();
+                      FocusManager.instance.primaryFocus?.unfocus();
                       if (dCtx.mounted) Navigator.pop(dCtx);
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text('✅ "$itemName" berhasil ditandai sebagai Sudah Disalurkan!'),
-                          backgroundColor: Colors.green.shade700,
-                        ),
-                      );
+                      if (messenger.mounted) {
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('✅ "$itemName" berhasil ditandai sebagai Sudah Disalurkan!'),
+                            backgroundColor: Colors.green.shade700,
+                          ),
+                        );
+                      }
                       // FIX 3: refresh FutureBuilder di bottom sheet
                       onDone?.call();
                     },
@@ -2280,6 +2146,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
         ),
       ),
     );
+    noteCtrl.dispose();
   }
 
   // PBI 2: Hapus item wishlist yang masih open
@@ -2530,6 +2397,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                 }
 
                 if (dCtx.mounted) {
+                  FocusManager.instance.primaryFocus?.unfocus();
                   Navigator.pop(dCtx);
                 }
                 if (mounted) {
@@ -2545,6 +2413,9 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
         ),
       ),
     );
+    titleCtrl.dispose();
+    amountCtrl.dispose();
+    descCtrl.dispose();
   }
 
   Widget _buildChildImage(String url, double width, double height) {
@@ -2920,162 +2791,444 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   }
 }
 
-Future<void> showAdminBroadcastDialog(BuildContext context) async {
-  // PBI 4: Capture messenger & navigator SEBELUM async gap apapun
-  final messenger = ScaffoldMessenger.of(context);
+class _PublishReportDialog extends StatefulWidget {
+  final String childId;
+  final String childName;
+  final ImagePicker picker;
+  final LocalDatabase localDb;
 
-  final titleCtrl = TextEditingController();
-  final bodyCtrl = TextEditingController();
+  const _PublishReportDialog({
+    required this.childId,
+    required this.childName,
+    required this.picker,
+    required this.localDb,
+  });
 
-  await showDialog<void>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dCtx) => StatefulBuilder(
-      builder: (dCtx, setDlgState) {
-        // PBI 4: isSending berada di dalam closure StatefulBuilder agar reactive
-        bool isSending = false;
+  @override
+  State<_PublishReportDialog> createState() => _PublishReportDialogState();
+}
 
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: const [
-              Icon(Icons.campaign, color: Color(0xFF388E3C), size: 24),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Broadcast Kabar ke Donatur',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+class _PublishReportDialogState extends State<_PublishReportDialog> {
+  final _titleCtrl = TextEditingController();
+  final _summaryCtrl = TextEditingController();
+  final _statusCtrl = TextEditingController();
+
+  String _selectedCategory = 'Prestasi';
+  String _evidenceUrl = '';
+  bool _isPolishing = false;
+  bool _isSaving = false;
+  String? _validationError;
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _summaryCtrl.dispose();
+    _statusCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handlePolishStory() async {
+    final raw = _summaryCtrl.text.trim();
+    if (raw.isEmpty) {
+      setState(() => _validationError = 'Tulis cerita perkembangan terlebih dahulu sebelum dirapikan AI.');
+      return;
+    }
+    setState(() {
+      _isPolishing = true;
+      _validationError = null;
+    });
+    final polished = await GeminiService().polishReportStory(
+      childName: widget.childName,
+      category: _selectedCategory,
+      rawStory: raw,
+    );
+    if (!mounted) return;
+    setState(() {
+      if (polished.isNotEmpty) {
+        _summaryCtrl.text = polished;
+      }
+      _isPolishing = false;
+    });
+  }
+
+  Future<void> _handlePublish() async {
+    final title = _titleCtrl.text.trim();
+    final summary = _summaryCtrl.text.trim();
+    final dailyStatus = _statusCtrl.text.trim();
+    if (title.isEmpty && summary.isEmpty) {
+      setState(() => _validationError = 'Judul atau cerita perkembangan wajib diisi.');
+      return;
+    }
+    setState(() {
+      _isSaving = true;
+      _validationError = null;
+    });
+
+    try {
+      final payload = <String, dynamic>{
+        'id': 'rep_${DateTime.now().millisecondsSinceEpoch}',
+        'child_id': widget.childId,
+        'child_alias': widget.childName,
+        'title': title,
+        'category': _selectedCategory,
+        'period': DateTime.now().toIso8601String().substring(0, 7),
+        'summary': summary,
+        'evidence_url': _evidenceUrl,
+        'author_name': 'Pengurus Panti',
+        'created_at': DateTime.now().toIso8601String(),
+        'daily_status': dailyStatus,
+      };
+      try {
+        final res = await DioClient()
+            .dio
+            .post('/reports', data: payload)
+            .timeout(const Duration(seconds: 8));
+        if (res.statusCode == 201 && res.data is Map && res.data['data'] is Map) {
+          payload['id'] = res.data['data']['id']?.toString() ?? payload['id'];
+        }
+      } catch (_) {}
+
+      if (dailyStatus.isNotEmpty) {
+        final childKey = widget.childId.isNotEmpty ? widget.childId : widget.childName;
+        if (widget.childId.isNotEmpty) {
+          try {
+            await DioClient()
+                .dio
+                .patch('/children/${widget.childId}/daily-status', data: {'daily_status': dailyStatus})
+                .timeout(const Duration(seconds: 5));
+          } catch (_) {}
+        }
+        try {
+          await widget.localDb.updateChildDailyStatusLocal(childKey, dailyStatus);
+        } catch (_) {}
+      }
+
+      try {
+        await widget.localDb.cacheProgressReports([payload]);
+      } catch (_) {}
+    } finally {
+      FocusManager.instance.primaryFocus?.unfocus();
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: Text(
+        'Bagikan Kabar ${widget.childName}',
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: _selectedCategory,
+              decoration: const InputDecoration(
+                labelText: 'Kategori Kabar',
+                border: OutlineInputBorder(),
               ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE8F5E9),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF81C784)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.info_outline, size: 16, color: Color(0xFF388E3C)),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Pesan akan dikirim sebagai notifikasi ke semua donatur aktif.',
-                          style: TextStyle(fontSize: 11, color: Color(0xFF2E7D32)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                TextField(
-                  controller: titleCtrl,
-                  maxLength: 120,
-                  decoration: const InputDecoration(
-                    labelText: 'Judul Notifikasi',
-                    hintText: 'Contoh: Laporan & Kabar Terbaru Anak Asuh',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.title),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: bodyCtrl,
-                  maxLines: 4,
-                  maxLength: 1000,
-                  decoration: const InputDecoration(
-                    labelText: 'Isi Pesan Broadcast',
-                    hintText: 'Tulis pengumuman atau ucapan terima kasih untuk seluruh donatur...',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.message_outlined),
-                  ),
-                ),
-              ],
+              items: const ['Prestasi', 'Karya Anak', 'Kesehatan', 'Kegiatan']
+                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                  .toList(),
+              onChanged: _isSaving ? null : (val) => setState(() => _selectedCategory = val ?? 'Prestasi'),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: isSending ? null : () {
-                titleCtrl.dispose();
-                bodyCtrl.dispose();
-                Navigator.pop(dCtx);
-              },
-              child: const Text('Batal'),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _statusCtrl,
+              enabled: !_isSaving,
+              maxLength: 80,
+              decoration: InputDecoration(
+                labelText: '📢 Status Harian (1 baris singkat)',
+                hintText: 'Contoh: Hari ini Ani belajar mengaji dengan semangat 🌟',
+                border: const OutlineInputBorder(),
+                helperText: 'Muncul sebagai status terbaru di halaman donatur',
+                helperStyle: TextStyle(fontSize: 10, color: Colors.grey[600]),
+              ),
             ),
-            ElevatedButton.icon(
-              onPressed: isSending
+            const SizedBox(height: 10),
+            TextField(
+              controller: _titleCtrl,
+              enabled: !_isSaving,
+              decoration: const InputDecoration(
+                labelText: 'Judul Kabar',
+                hintText: 'Contoh: Juara Lomba Mewarnai',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _summaryCtrl,
+              enabled: !_isSaving,
+              minLines: 3,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Cerita Perkembangan',
+                hintText: 'Ceritakan momen baik anak hari ini...',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: (_isPolishing || _isSaving) ? null : _handlePolishStory,
+              icon: const Icon(Icons.auto_awesome, size: 16),
+              label: Text(
+                _isPolishing ? 'Merapikan...' : 'Rapikan Kalimat dengan AI',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _isSaving
                   ? null
                   : () async {
-                      final title = titleCtrl.text.trim();
-                      final body = bodyCtrl.text.trim();
-                      if (title.isEmpty || body.isEmpty) {
-                        messenger.showSnackBar(
-                          const SnackBar(
-                            content: Text('⚠️ Judul dan isi pesan wajib diisi.'),
-                            backgroundColor: Colors.orange,
-                          ),
-                        );
-                        return;
-                      }
-                      // PBI 4: update isSending SEBELUM await
-                      setDlgState(() => isSending = true);
-
-                      String feedback = '📡 Broadcast tercatat, akan dikirim saat terhubung.';
-                      bool success = false;
-                      try {
-                        final res = await DioClient().dio.post(
-                          '/notifications/broadcast',
-                          data: {'title': title, 'body': body},
-                        );
-                        if (res.statusCode == 200 || res.statusCode == 201) {
-                          feedback = '✅ Broadcast berhasil dikirim ke seluruh donatur!';
-                          success = true;
-                        }
-                      } catch (_) {
-                        // offline — feedback default tetap
-                      }
-
-                      // PBI 4: dispose controller SEBELUM pop dialog
-                      titleCtrl.dispose();
-                      bodyCtrl.dispose();
-
-                      // PBI 4: pop dialog dengan dCtx (bukan context parent)
-                      if (dCtx.mounted) Navigator.pop(dCtx);
-
-                      // PBI 4: tampilkan snackbar via messenger yang sudah di-capture
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text(feedback),
-                          backgroundColor: success
-                              ? const Color(0xFF388E3C)
-                              : Colors.blueGrey.shade700,
-                          duration: const Duration(seconds: 4),
-                        ),
+                      final picked = await widget.picker.pickImage(
+                        source: ImageSource.gallery,
+                        maxWidth: 800,
+                        imageQuality: 65,
                       );
+                      if (picked != null && mounted) {
+                        final bytes = await picked.readAsBytes();
+                        if (!mounted) return;
+                        setState(() {
+                          _evidenceUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                        });
+                      }
                     },
-              icon: isSending
-                  ? const SizedBox(
-                      width: 14, height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.send, size: 16),
-              label: Text(isSending ? 'Mengirim...' : 'Kirim Broadcast'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF388E3C),
-                foregroundColor: Colors.white,
+              icon: const Icon(Icons.photo_camera_outlined, size: 16),
+              label: Text(
+                _evidenceUrl.isEmpty ? 'Lampirkan Foto / Karya (Opsional)' : 'Foto Terlampir ✓',
+                style: const TextStyle(fontSize: 12),
               ),
             ),
+            if (_validationError != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                _validationError!,
+                style: TextStyle(fontSize: 12, color: Colors.red.shade700, fontWeight: FontWeight.w500),
+              ),
+            ],
           ],
-        );
-      },
-    ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving
+              ? null
+              : () {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  Navigator.of(context).pop(false);
+                },
+          child: const Text('Batal'),
+        ),
+        ElevatedButton(
+          onPressed: _isSaving ? null : _handlePublish,
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+          child: _isSaving
+              ? const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    ),
+                    SizedBox(width: 8),
+                    Text('Mempublikasikan...'),
+                  ],
+                )
+              : const Text('Publikasikan'),
+        ),
+      ],
+    );
+  }
+}
+
+Future<void> showAdminBroadcastDialog(BuildContext context) async {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final result = await showDialog<Map<String, dynamic>>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const _AdminBroadcastDialog(),
   );
+
+  if (result != null && messenger != null && messenger.mounted) {
+    final success = result['success'] == true;
+    final feedback = (result['feedback'] ?? '📡 Broadcast tercatat, akan dikirim saat terhubung.').toString();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(feedback),
+        backgroundColor: success ? const Color(0xFF388E3C) : Colors.blueGrey.shade700,
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+}
+
+class _AdminBroadcastDialog extends StatefulWidget {
+  const _AdminBroadcastDialog();
+
+  @override
+  State<_AdminBroadcastDialog> createState() => _AdminBroadcastDialogState();
+}
+
+class _AdminBroadcastDialogState extends State<_AdminBroadcastDialog> {
+  final _titleCtrl = TextEditingController();
+  final _bodyCtrl = TextEditingController();
+
+  bool _isSending = false;
+  String? _validationError;
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _bodyCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleSend() async {
+    final title = _titleCtrl.text.trim();
+    final body = _bodyCtrl.text.trim();
+    if (title.isEmpty || body.isEmpty) {
+      setState(() => _validationError = '⚠️ Judul dan isi pesan wajib diisi.');
+      return;
+    }
+
+    setState(() {
+      _isSending = true;
+      _validationError = null;
+    });
+
+    String feedback = '📡 Broadcast tercatat, akan dikirim saat terhubung.';
+    bool success = false;
+    try {
+      final res = await DioClient().dio.post(
+        '/notifications/broadcast',
+        data: {'title': title, 'body': body},
+      ).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        feedback = '✅ Broadcast berhasil dikirim ke seluruh donatur!';
+        success = true;
+      }
+    } catch (_) {
+      // Offline fallback feedback applies
+    } finally {
+      FocusManager.instance.primaryFocus?.unfocus();
+      if (mounted) {
+        Navigator.of(context).pop({'success': success, 'feedback': feedback});
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Row(
+        children: [
+          Icon(Icons.campaign, color: Color(0xFF388E3C), size: 24),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Broadcast Kabar ke Donatur',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF81C784)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: Color(0xFF388E3C)),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Pesan akan dikirim sebagai notifikasi ke semua donatur aktif.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF2E7D32)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextField(
+              controller: _titleCtrl,
+              enabled: !_isSending,
+              maxLength: 120,
+              decoration: const InputDecoration(
+                labelText: 'Judul Notifikasi',
+                hintText: 'Contoh: Laporan & Kabar Terbaru Anak Asuh',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.title),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _bodyCtrl,
+              enabled: !_isSending,
+              maxLines: 4,
+              maxLength: 1000,
+              decoration: const InputDecoration(
+                labelText: 'Isi Pesan Broadcast',
+                hintText: 'Tulis pengumuman atau ucapan terima kasih untuk seluruh donatur...',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.message_outlined),
+              ),
+            ),
+            if (_validationError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _validationError!,
+                style: TextStyle(fontSize: 12, color: Colors.orange.shade900, fontWeight: FontWeight.w500),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSending
+              ? null
+              : () {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  Navigator.of(context).pop();
+                },
+          child: const Text('Batal'),
+        ),
+        ElevatedButton.icon(
+          onPressed: _isSending ? null : _handleSend,
+          icon: _isSending
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.send, size: 16),
+          label: Text(_isSending ? 'Mengirim...' : 'Kirim Broadcast'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF388E3C),
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 

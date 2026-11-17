@@ -92,15 +92,23 @@ class _DonationFormScreenState extends State<DonationFormScreen> {
   bool _isUsingRealtimeRates = false;
   final ExchangeRateService _rateService = ExchangeRateService();
 
+  int? _resolveInitialAmountIdr() {
+    final raw = widget.wishlistItem?['estimated_idr'] ??
+        widget.packageData['monthly_idr'] ??
+        widget.packageData['price_idr'];
+    if (raw == null) return null;
+    final parsed = raw is num
+        ? raw.round()
+        : int.tryParse(raw.toString().replaceAll(RegExp(r'[^0-9]'), ''));
+    return (parsed != null && parsed > 0) ? parsed : null;
+  }
+
   @override
   void initState() {
     super.initState();
-    final wlEst = widget.wishlistItem?['estimated_idr'];
-    if (wlEst != null) {
-      final estNum = wlEst is num ? wlEst.toInt() : int.tryParse(wlEst.toString()) ?? 0;
-      if (estNum > 0) {
-        _amountController.text = estNum.toString();
-      }
+    final initialAmount = _resolveInitialAmountIdr();
+    if (initialAmount != null) {
+      _amountController.text = initialAmount.toString();
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -934,7 +942,8 @@ class _DonationFormScreenState extends State<DonationFormScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            widget.packageData['name'],
+                            '${widget.packageData['name'] ?? 'Paket Sponsorship'}'
+                            '${widget.wishlistItem == null && _resolveInitialAmountIdr() != null ? ' • ${_formatRupiah(_resolveInitialAmountIdr()!.toDouble())} / bulan' : ''}',
                             style: const TextStyle(fontSize: 13, color: AppColors.primaryDark),
                           ),
                         ],
